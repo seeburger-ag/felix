@@ -38,7 +38,7 @@ import org.osgi.framework.ServiceReference;
 public class BindMethodTest extends TestCase
 {
 
-    private ServiceReference m_serviceReference;
+    private ServiceReference<Object> m_serviceReference;
     private FakeService m_serviceInstance;
     private BundleContext m_context;
 
@@ -49,7 +49,7 @@ public class BindMethodTest extends TestCase
         m_serviceInstance = (FakeService) EasyMock.createNiceMock( FakeService.class );
         m_context = ( BundleContext ) EasyMock.createNiceMock( BundleContext.class );
 
-        EasyMock.expect( m_context.getService( m_serviceReference ) ).andReturn( m_serviceInstance )
+        EasyMock.expect( m_context.getService( m_serviceReference ) ).andReturn(  m_serviceInstance )
                 .anyTimes();
 
         EasyMock.expect( m_serviceReference.getPropertyKeys() ).andReturn( new String[]

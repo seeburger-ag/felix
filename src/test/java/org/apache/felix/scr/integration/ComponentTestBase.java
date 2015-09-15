@@ -67,6 +67,7 @@ import org.ops4j.pax.exam.OptionUtils;
 import org.ops4j.pax.exam.TestProbeBuilder;
 import org.ops4j.pax.exam.junit.Configuration;
 import org.ops4j.pax.exam.junit.ProbeBuilder;
+import org.ops4j.pax.exam.options.SystemPackageOption;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleException;
@@ -120,10 +121,10 @@ public abstract class ComponentTestBase
 
     protected static boolean NONSTANDARD_COMPONENT_FACTORY_BEHAVIOR = false;
     protected volatile Log log;
-    
+
     //set to true to only get last 1000 lines of log.
     protected static boolean restrictedLogging;
-    
+
     protected static String felixCaVersion = System.getProperty( "felix.ca.version" );
 
 
@@ -159,12 +160,14 @@ public abstract class ComponentTestBase
                 + BUNDLE_JAR_SYS_PROP + " system property" );
         }
 
+
         final Option[] base = options(
             provision(
                 CoreOptions.bundle( bundleFile.toURI().toString() ),
                 mavenBundle( "org.ops4j.pax.tinybundles", "tinybundles", "1.0.0" ),
                 mavenBundle( "org.apache.felix", "org.apache.felix.configadmin", felixCaVersion )
              ),
+             CoreOptions.systemPackages("javax.xml.parsers","javax.net.ssl","org.w3c.dom","org.xml.sax"),
              junitBundles(),
              frameworkProperty( "org.osgi.framework.bsnversion" ).value( bsnVersionUniqueness ),
              systemProperty( "ds.factory.enabled" ).value( Boolean.toString( NONSTANDARD_COMPONENT_FACTORY_BEHAVIOR ) ),
@@ -183,7 +186,7 @@ public abstract class ComponentTestBase
         log.start();
         bundleContext.addFrameworkListener( log );
         bundleContext.registerService( LogService.class.getName(), log, null );
-        
+
         scrTracker = new ServiceTracker( bundleContext, "org.apache.felix.scr.ScrService", null );
         scrTracker.open();
         configAdminTracker = new ServiceTracker( bundleContext, "org.osgi.service.cm.ConfigurationAdmin", null );
@@ -283,7 +286,7 @@ public abstract class ComponentTestBase
     protected org.osgi.service.cm.Configuration configure( String pid )
     {
         return configure( pid, null );
-        
+
     }
 
     protected org.osgi.service.cm.Configuration configure( String pid, String bundleLocation )
@@ -394,7 +397,7 @@ public abstract class ComponentTestBase
             return null; // keep the compiler happy
         }
     }
-    
+
     protected Object getComponentManagerFromComponentInstance( Object instance )
     {
         Object cc = getFieldValue( instance, "m_componentContext");
@@ -419,7 +422,7 @@ public abstract class ComponentTestBase
             }
             clazz = clazz.getSuperclass();
         }
-        throw new NoSuchFieldException(fieldName);        
+        throw new NoSuchFieldException(fieldName);
     }
 
 
@@ -427,7 +430,7 @@ public abstract class ComponentTestBase
     {
         return installBundle(descriptorFile, componentPackage, "simplecomponent", "0.0.11", null);
     }
-    
+
     protected Bundle installBundle( final String descriptorFile, String componentPackage, String symbolicName, String version, String location ) throws BundleException
     {
         final InputStream bundleStream = bundle()
@@ -590,8 +593,8 @@ public abstract class ComponentTestBase
             }
         }
     }
-    
-    protected boolean isAtLeastR5() 
+
+    protected boolean isAtLeastR5()
     {
         try
         {
@@ -713,7 +716,7 @@ public abstract class ComponentTestBase
             return m_thread;
         }
     }
-    
+
     public static class Log implements LogService, FrameworkListener, Runnable
     {
         private static final int RESTRICTED_LOG_SIZE = 1000;
@@ -747,7 +750,7 @@ public abstract class ComponentTestBase
             m_logThread.start();
         }
 
-        
+
         public void stop()
         {
             System.setOut(m_realOut);
@@ -783,7 +786,7 @@ public abstract class ComponentTestBase
         {
             return m_warnings;
         }
-        
+
         Throwable getFirstFrameworkThrowable()
         {
             return firstFrameworkThrowable;

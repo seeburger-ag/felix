@@ -36,32 +36,32 @@
         <developerConnection>scm:svn:https://svn.apache.org/repos/asf/felix/releases/org.apache.felix.scr-1.8.2</developerConnection>
         <url>scm:svn:https://svn.apache.org/repos/asf/felix/releases/org.apache.felix.scr-1.8.2</url>
     </scm>
-    
+
     <!--
         A Note on Testing
         =================
-        
+
         This project contains two kinds of tests: regular unit tests running
         in the test phase and integration tests based on PAX Exam running
         in the integration-test phase.
-        
+
         Basically the complete project is build using Java 1.3 source and target
         compatibility (as inherited from the parent pom). The exception are the
         unit tests in the "integration" packages. These have to be compiled with
         Java 5 source and target compatibility because the employ annotations
         and generics.
-        
+
         For running the integration tests from the console using Maven nothing
         special has to be done as the tests run automatically. To run the tests
         in your IDE, the project has to be built to the "package" phase with
         the profile "ide" enabled:
-        
+
              $ mvn -Pide clean package
-             
+
         This creates the scr.jar file in the target folder, which is used by
         the integration tests when run from the IDE. Alternatively the
         "project.bundle.file" system property may be set to the bundle JAR
-        in the IDE launcher. 
+        in the IDE launcher.
     -->
     <properties>
         <bundle.build.name>
@@ -72,8 +72,8 @@
         </bundle.file.name>
         <felix.ca.version>1.8.0</felix.ca.version>
     </properties>
-    
-    
+
+
     <dependencies>
         <dependency>
             <groupId>org.osgi</groupId>
@@ -138,14 +138,14 @@
             <version>3.2.0</version>
             <scope>test</scope>
         </dependency>
-    
+
         <dependency>
             <groupId>org.ops4j.pax.exam</groupId>
             <artifactId>pax-exam-link-mvn</artifactId>
             <version>3.2.0</version>
             <scope>test</scope>
         </dependency>
-    
+
         <dependency>
             <groupId>org.ops4j.pax.url</groupId>
             <artifactId>pax-url-aether</artifactId>
@@ -170,14 +170,14 @@
             <version>1.6.3</version>
             <scope>test</scope>
         </dependency>
-    
+
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-core</artifactId>
             <version>0.9.29</version>
             <scope>test</scope>
         </dependency>
-    
+
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
@@ -272,15 +272,15 @@
                             -->
                             org.osgi.service.metatype;version="[1.1,2)";resolution:=optional,
                             <!--
-                                optional import for Gogo annotations 
+                                optional import for Gogo annotations
                             -->
                             org.apache.felix.service.command;resolution:=optional,
-                            
+
                             <!--
-                                The Felix Shell support is optional 
+                                The Felix Shell support is optional
                             -->
                             org.apache.felix.shell;provide:=true;resolution:=optional,
-                            
+
                             <!--
                                 Framework version 1.4 (from R4.1) is required
                                 because we depend on ServiceReference being
@@ -288,7 +288,7 @@
                                 being available.
                             -->
                             org.osgi.framework;version="[1.4,2)",
-                            
+
                             <!--
                                 LogService is optional but if present the
                                 R4.0 version 1.3 is sufficient.
@@ -299,17 +299,17 @@
                                 PackageAdmin is used to find reference types if
                                 the component's bundle does not import it.
                                 See BindMethod.getParameterClass(Class) for details.
-                                R4.0 version 1.2 is sufficient. 
+                                R4.0 version 1.2 is sufficient.
                             -->
                             org.osgi.service.packageadmin;version="[1.2,2)";resolution:=optional,
-                            
+
                             <!--
                                 SCR API is required (we also export it) and must
                                 be of the same minor version as we export, because
                                 we implement that exact version. This import is
                                 only used if the framework decides to wire the
                                 bundle to another API provider.
-                                (version is automatically deduced from export) 
+                                (version is automatically deduced from export)
                             -->
                             org.osgi.service.component;provide:=true,
 
@@ -318,7 +318,7 @@
                                 must be of the same minor version as we export,
                                 because we implement that exact version. This
                                 import is only used if the framework decides to
-                                wire the bundle to another API provider. 
+                                wire the bundle to another API provider.
                             -->
                             org.apache.felix.scr;provide:=true
                         </Import-Package>
@@ -327,10 +327,10 @@
                                 Configuration Admin version 1.2 (from R4.0) is enough
                             -->
                             org.osgi.service.cm;version="[1.2,2)",
-                            
+
                             <!--
                                 Metatype is optional and if it is
-                                present, version 1.1 (from R4.1) is enough  
+                                present, version 1.1 (from R4.1) is enough
                             -->
                             org.osgi.service.metatype;version="[1.1,2)"
                         </DynamicImport-Package>
@@ -404,7 +404,7 @@
                 <configuration>
                     <systemPropertyVariables>
                         <project.bundle.file>${bundle.file.name}</project.bundle.file>
-                        <felix.ca.version>${felix.ca.version}</felix.ca.version>    
+                        <felix.ca.version>${felix.ca.version}</felix.ca.version>
                     </systemPropertyVariables>
                     <excludes>
                         <exclude>**/components/**</exclude>
@@ -422,6 +422,7 @@
                     <excludePackageNames>*.impl</excludePackageNames>
                 </configuration>
             </plugin>
+            <!--
              <plugin>
                 <groupId>org.apache.aries.versioning</groupId>
                 <artifactId>org.apache.aries.versioning.plugin</artifactId>
@@ -438,7 +439,7 @@
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
+            </plugin> -->
         </plugins>
     </build>
 
@@ -520,5 +521,5 @@
             </properties>
         </profile>
     </profiles>
-        
+
 </project>

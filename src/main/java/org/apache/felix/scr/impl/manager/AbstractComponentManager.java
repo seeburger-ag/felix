@@ -54,6 +54,7 @@ import org.apache.felix.scr.impl.metadata.ServiceMetadata;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.framework.ServiceException;
 import org.osgi.framework.ServicePermission;
 import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
@@ -99,20 +100,20 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     private BundleComponentActivator m_activator;
 
     // The ServiceRegistration is now tracked in the RegistrationManager
-    
+
     private final ReentrantLock m_stateLock;
 
     /**
-     * This latch prevents concurrent enable, disable, and reconfigure.  Since the enable and disable operations may use 
+     * This latch prevents concurrent enable, disable, and reconfigure.  Since the enable and disable operations may use
      * two threads and the initiating thread does not wait for the operation to complete, we can't use a regular lock.
      */
     private final AtomicReference< CountDownLatch> m_enabledLatchRef = new AtomicReference<CountDownLatch>( new CountDownLatch(0) );
 
     protected volatile boolean m_enabled;
     protected volatile boolean m_internalEnabled;
-    
+
     protected volatile boolean m_disposed;
-    
+
     //service event tracking
     private int m_floor;
 
@@ -123,7 +124,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     private final Set<Integer> m_missing = new TreeSet<Integer>( );
 
     volatile boolean m_activated;
-    
+
     protected final ReentrantReadWriteLock m_activationLock = new ReentrantReadWriteLock();
 
     /**
@@ -137,7 +138,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     {
         this( activator, metadata, componentMethods, false );
     }
-    
+
     protected AbstractComponentManager( BundleComponentActivator activator, ComponentMetadata metadata, ComponentMethods componentMethods, boolean factoryInstance )
     {
         m_factoryInstance = factoryInstance;
@@ -188,7 +189,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         return ScrConfiguration.DEFAULT_LOCK_TIMEOUT_MILLISECONDS;
     }
 
-    private void obtainLock( Lock lock, String source )
+    private void obtainLock( Lock lock )
     {
         try
         {
@@ -217,36 +218,36 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             Thread.currentThread().interrupt();
         }
     }
-    
-    final void obtainActivationReadLock( String source )
+
+    final void obtainActivationReadLock(  )
     {
-        obtainLock( m_activationLock.readLock(), source);
+        obtainLock( m_activationLock.readLock());
     }
 
-    final void releaseActivationReadLock( String source )
+    final void releaseActivationReadLock( )
     {
         m_activationLock.readLock().unlock();
     }
-    
-    final void obtainActivationWriteLock( String source )
+
+    final void obtainActivationWriteLock( )
     {
-        obtainLock( m_activationLock.writeLock(), source);
+        obtainLock( m_activationLock.writeLock());
     }
 
-    final void releaseActivationWriteeLock( String source )
+    final void releaseActivationWriteeLock( )
     {
         if ( m_activationLock.getWriteHoldCount() > 0 )
         {
             m_activationLock.writeLock().unlock();
         }
     }
-    
-    final void obtainStateLock( String source )
+
+    final void obtainStateLock()
     {
-        obtainLock( m_stateLock, source );
+        obtainLock( m_stateLock );
     }
 
-    final void releaseStateLock( String source )
+    final void releaseStateLock()
     {
         m_stateLock.unlock();
     }
@@ -255,7 +256,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     {
         return m_stateLock.getHoldCount() > 0;
     }
-    
+
     final void dumpThreads()
     {
         try
@@ -301,7 +302,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     }
 
     /**
-     * We effectively maintain the set of completely processed service event tracking counts.  This method waits for all events prior 
+     * We effectively maintain the set of completely processed service event tracking counts.  This method waits for all events prior
      * to the parameter tracking count to complete, then returns.  See further documentation in EdgeInfo.
      * @param trackingCount
      */
@@ -318,7 +319,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
                 {
                     if ( !doMissingWait())
                     {
-                        return;                        
+                        return;
                     }
                 }
                 catch ( InterruptedException e )
@@ -327,7 +328,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
                     {
                         if ( !doMissingWait())
                         {
-                            return;                        
+                            return;
                         }
                     }
                     catch ( InterruptedException e1 )
@@ -344,7 +345,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             m_missingLock.unlock();
         }
     }
-    
+
     private boolean doMissingWait() throws InterruptedException
     {
         if ( !m_missingCondition.await( getLockTimeout(), TimeUnit.MILLISECONDS ))
@@ -459,7 +460,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     /**
      * Use a CountDownLatch as a non-reentrant "lock" that can be passed between threads.
      * This lock assures that enable, disable, and reconfigure operations do not overlap.
-     * 
+     *
      * @return the latch to count down when the operation is complete (in the calling or another thread)
      * @throws InterruptedException
      */
@@ -491,7 +492,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             newEnabledLatch = new CountDownLatch(1);
         }
         while ( !m_enabledLatchRef.compareAndSet( enabledLatch, newEnabledLatch) );
-        return newEnabledLatch;  
+        return newEnabledLatch;
     }
 
     /**
@@ -579,7 +580,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     {
         deactivateInternal( reason, true, true );
     }
-    
+
     <T> void registerMissingDependency( DependencyManager<S, T> dm, ServiceReference<T> ref, int trackingCount)
     {
         BundleComponentActivator activator = getActivator();
@@ -622,7 +623,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         // already disposed off component or bundle context is invalid
         return null;
     }
-    
+
     BundleContext getBundleContext()
     {
         final BundleComponentActivator activator = getActivator();
@@ -630,7 +631,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         {
             return activator.getBundleContext();
         }
-        return null;        
+        return null;
     }
 
 
@@ -809,7 +810,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             return;
         }
 
-        obtainActivationReadLock( "activateInternal" );
+        obtainActivationReadLock(  );
         try
         {
             // Double check conditions now that we have obtained the lock
@@ -852,7 +853,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         }
         finally
         {
-            releaseActivationReadLock( "activateInternal" );
+            releaseActivationReadLock(  );
         }
     }
 
@@ -877,14 +878,14 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
 
         // catch any problems from deleting the component to prevent the
         // component to remain in the deactivating state !
-        obtainActivationReadLock( "deactivateInternal" );
+        obtainActivationReadLock(  );
         try
         {
             doDeactivate( reason, disable || m_factoryInstance );
         }
-        finally 
+        finally
         {
-            releaseActivationReadLock( "deactivateInternal" );
+            releaseActivationReadLock(  );
         }
         if ( isFactory() || m_factoryInstance || dispose )
         {
@@ -901,7 +902,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             {
                 log( LogService.LOG_DEBUG, "Component deactivation occuring on another thread", null );
             }
-            obtainStateLock( "AbstractComponentManager.State.doDeactivate.1" );
+            obtainStateLock(  );
             try
             {
                 m_activated = false;
@@ -915,7 +916,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             }
             finally
             {
-                releaseStateLock( "AbstractComponentManager.State.doDeactivate.1" );
+                releaseStateLock( );
             }
         }
         catch ( Throwable t )
@@ -976,7 +977,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     {
         return m_componentMethods;
     }
-    
+
     protected String[] getProvidedServices()
     {
         if ( getComponentMetadata().getServiceMetadata() != null )
@@ -985,7 +986,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
             return provides;
         }
         return null;
-        
+
     }
 
     private final RegistrationManager<ServiceRegistration<S>> registrationManager = new RegistrationManager<ServiceRegistration<S>>()
@@ -995,14 +996,21 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         ServiceRegistration<S> register(String[] services)
         {
             BundleContext bundleContext = getBundleContext();
-            if (bundleContext == null) 
+            if (bundleContext == null)
             {
                 return null;
             }
             final Dictionary<String, Object> serviceProperties = getServiceProperties();
-            ServiceRegistration<S> serviceRegistration = ( ServiceRegistration<S> ) bundleContext
-                    .registerService( services, getService(), serviceProperties );
-            return serviceRegistration;
+            try {
+				ServiceRegistration<S> serviceRegistration = (ServiceRegistration<S>) bundleContext
+						.registerService(services, getService(),
+								serviceProperties);
+				return serviceRegistration;
+			} catch (ServiceException e) {
+				log(LogService.LOG_ERROR, "Unexpected error registering component service with properties {0}",
+						new Object[] {serviceProperties}, e);
+				return null;
+			}
         }
 
         @Override
@@ -1028,9 +1036,9 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         {
             dumpThreads();
         }
-        
+
     };
-    
+
 
     /**
      * Registers the service on behalf of the component.
@@ -1055,7 +1063,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         }
         return true;
     }
-    
+
 
     AtomicInteger getTrackingCount()
     {
@@ -1083,7 +1091,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         }
         catch ( ClassNotFoundException e )
         {
-            log( LogService.LOG_ERROR, "Could not load implementation object class {0}", 
+            log( LogService.LOG_ERROR, "Could not load implementation object class {0}",
                     new Object[] {getComponentMetadata().getImplementationClassName()}, e );
             throw new IllegalStateException("Could not load implementation object class "
                     + getComponentMetadata().getImplementationClassName());
@@ -1155,7 +1163,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     }
 
 
-    final ServiceRegistration<S> getServiceRegistration() 
+    final ServiceRegistration<S> getServiceRegistration()
     {
         return registrationManager.getServiceRegistration();
     }
@@ -1480,5 +1488,5 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     {
         return m_internalEnabled;
     }
-    
+
 }
