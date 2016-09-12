@@ -30,7 +30,7 @@
         Implementation of the Declarative Services specification 1.2
     </description>
     <artifactId>org.apache.felix.scr</artifactId>
-    <version>1.8.2.SEE1-SNAPSHOT</version>
+    <version>1.8.2.SEE1</version>
     <scm>
         <connection>scm:git:git@github.com:seeburger-ag/felix.git</connection>
         <developerConnection>scm:git:git@github.com:seeburger-ag/felix.git</developerConnection>
