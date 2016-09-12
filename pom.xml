@@ -32,9 +32,8 @@
     <artifactId>org.apache.felix.scr</artifactId>
     <version>1.8.2.SEE1-SNAPSHOT</version>
     <scm>
-        <connection>scm:svn:https://svn.apache.org/repos/asf/felix/releases/org.apache.felix.scr-1.8.2</connection>
-        <developerConnection>scm:svn:https://svn.apache.org/repos/asf/felix/releases/org.apache.felix.scr-1.8.2</developerConnection>
-        <url>scm:svn:https://svn.apache.org/repos/asf/felix/releases/org.apache.felix.scr-1.8.2</url>
+        <connection>scm:git:git@github.com:seeburger-ag/felix.git</connection>
+        <developerConnection>scm:git:git@github.com:seeburger-ag/felix.git</developerConnection>
     </scm>
 
     <!--
