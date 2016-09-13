@@ -428,6 +428,18 @@
                     <excludePackageNames>*.impl</excludePackageNames>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>2.5.2</version>
+                <configuration>
+                    <arguments>${arguments}</arguments>
+                    <useReleaseProfile>false</useReleaseProfile>
+                    <goals>deploy</goals>
+                     <autoVersionSubmodules>true</autoVersionSubmodules>
+                     <mavenExecutorId>forked-path</mavenExecutorId>
+                </configuration>
+            </plugin>
             <!--
              <plugin>
                 <groupId>org.apache.aries.versioning</groupId>
@@ -527,7 +539,6 @@
             </properties>
         </profile>
     </profiles>
-
 
     <distributionManagement>
         <repository>
