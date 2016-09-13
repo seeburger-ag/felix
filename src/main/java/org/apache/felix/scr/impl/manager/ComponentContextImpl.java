@@ -41,17 +41,17 @@ import org.osgi.service.log.LogService;
 public class ComponentContextImpl<S> implements ExtComponentContext {
 
     private final SingleComponentManager<S> m_componentManager;
-    
+
     private final EdgeInfo[] edgeInfos;
-    
+
     private final ComponentInstance m_componentInstance = new ComponentInstanceImpl(this);
-    
+
     private final Bundle m_usingBundle;
-    
+
     private final S m_implementationObject;
-    
+
     private volatile boolean m_implementationAccessible;
-    
+
     private final CountDownLatch accessibleLatch = new CountDownLatch(1);
 
     ComponentContextImpl( SingleComponentManager<S> componentManager, Bundle usingBundle, S implementationObject )
@@ -65,7 +65,7 @@ public class ComponentContextImpl<S> implements ExtComponentContext {
             edgeInfos[i] = new EdgeInfo();
         }
     }
-    
+
     void setImplementationAccessible(boolean implementationAccessible)
     {
         this.m_implementationAccessible = implementationAccessible;
@@ -74,7 +74,7 @@ public class ComponentContextImpl<S> implements ExtComponentContext {
             accessibleLatch.countDown();
         }
     }
-    
+
     EdgeInfo getEdgeInfo(DependencyManager<S, ?> dm)
     {
         int index = dm.getIndex();
@@ -189,7 +189,7 @@ public class ComponentContextImpl<S> implements ExtComponentContext {
     {
         getComponentManager().setServiceProperties(properties );
     }
-    
+
     //---------- ComponentInstance interface support ------------------------------
 
     S getImplementationObject( boolean requireAccessible )
@@ -216,14 +216,14 @@ public class ComponentContextImpl<S> implements ExtComponentContext {
             }
             catch ( InterruptedException e1 )
             {
-                m_componentManager.log( LogService.LOG_INFO, "Interrupted twice waiting for implementation object to become accessible", e1 );
+                m_componentManager.log( LogService.LOG_WARNING, "Interrupted twice waiting for implementation object to become accessible", e1 );
             }
             Thread.currentThread().interrupt();
             return null;
         }
         return null;
     }
-    
+
     private static class ComponentInstanceImpl implements ComponentInstance
     {
         private final ComponentContextImpl m_componentContext;

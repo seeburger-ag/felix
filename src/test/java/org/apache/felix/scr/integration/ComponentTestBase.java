@@ -165,7 +165,10 @@ public abstract class ComponentTestBase
             provision(
                 CoreOptions.bundle( bundleFile.toURI().toString() ),
                 mavenBundle( "org.ops4j.pax.tinybundles", "tinybundles", "1.0.0" ),
-                mavenBundle( "org.apache.felix", "org.apache.felix.configadmin", felixCaVersion )
+                mavenBundle( "org.apache.felix", "org.apache.felix.configadmin", felixCaVersion ),
+                mavenBundle( "org.slf4j", "slf4j-api", "1.7.14" ),
+                mavenBundle( "ch.qos.logback", "logback-classic", "0.9.27" ),
+                mavenBundle( "ch.qos.logback", "logback-core", "0.9.27" )
              ),
              CoreOptions.systemPackages("javax.xml.parsers","javax.net.ssl","org.w3c.dom","org.xml.sax"),
              junitBundles(),

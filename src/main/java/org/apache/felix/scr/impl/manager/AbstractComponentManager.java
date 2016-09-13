@@ -19,6 +19,7 @@
 package org.apache.felix.scr.impl.manager;
 
 import java.security.Permission;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -60,6 +61,8 @@ import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentConstants;
 import org.osgi.service.log.LogService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -126,6 +129,8 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
     volatile boolean m_activated;
 
     protected final ReentrantReadWriteLock m_activationLock = new ReentrantReadWriteLock();
+
+    private static final Logger LOG = LoggerFactory.getLogger(Activator.class);
 
     /**
      * The constructor receives both the activator and the metadata
@@ -1183,7 +1188,7 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
      */
     public boolean isLogEnabled( int level )
     {
-        return Activator.isLogEnabled( level );
+        return Activator.isLogEnabled( LogService.LOG_ERROR );
     }
 
 
@@ -1194,14 +1199,40 @@ public abstract class AbstractComponentManager<S> implements Component, SimpleLo
         {
             activator.log( level, message, getComponentMetadata(), m_componentId, ex );
         }
+        else
+        {
+    		switch (level) {
+    		case LogService.LOG_DEBUG:
+    			LOG.debug(message,ex);
+    			break;
+    		case LogService.LOG_INFO:
+    			LOG.info(message,ex);
+    			break;
+    		case LogService.LOG_WARNING:
+    			LOG.warn(message,ex);
+    			break;
+    		case LogService.LOG_ERROR:
+    			LOG.error(message,ex);
+    			break;
+    		default:
+    			LOG.info(message,ex);
+    			break;
+    		}
+        }
     }
 
     public void log( int level, String message, Object[] arguments, Throwable ex )
     {
+
         BundleComponentActivator activator = getActivator();
         if ( activator != null )
         {
             activator.log( level, message, arguments, getComponentMetadata(), m_componentId, ex );
+        }
+        else
+        {
+        	String formatted = MessageFormat.format(message, arguments);
+        	log(level, formatted, ex);
         }
     }
 

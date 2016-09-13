@@ -196,7 +196,12 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
      */
     S getInstance()
     {
-        return m_componentContext == null? null: m_componentContext.getImplementationObject( true );
+    	if(m_componentContext == null)
+    	{
+    		 log(LogService.LOG_WARNING, "getInstance: no component context was set for service "+getClassName()+". Returning null", null);
+    		 return null;
+    	}
+        return m_componentContext.getImplementationObject( true );
     }
 
     /**
@@ -307,6 +312,7 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
             }
             setter.resetImplementationObject( implementationObject );
             unsetDependenciesCollected();
+            log(LogService.LOG_WARNING, "createImplementationObject failed with missing dependencies for "+getClassName(), null);
             return null;
 
         }
@@ -316,6 +322,7 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
                 componentContext, 1 ), null, this );
         if ( result == null )
         {
+        	log(LogService.LOG_WARNING, "createImplementationObject failed to call the activate method for "+getClassName(), null);
             // 112.5.8 If the activate method throws an exception, SCR must log an error message
             // containing the exception with the Log Service and activation fails
             for ( DependencyManager md: getReversedDependencyManagers() )
@@ -798,15 +805,18 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
         try {
             boolean success = getServiceInternal();
             ComponentContextImpl<S> componentContext = m_componentContext;
-            if ( success && componentContext != null)
+            if(!success)
             {
-                decrement = false;
-                return componentContext.getImplementationObject( true );
+            	log(LogService.LOG_WARNING, "getServiceInternal was unsuccessful. Not returning service for "+getClassName(), null);
+            	return null;
             }
-            else
+            if(componentContext==null)
             {
-                return null;
+            	log(LogService.LOG_WARNING, "component context was null. Not returning service for "+getClassName(), null);
+            	return null;
             }
+            decrement = false;
+            return componentContext.getImplementationObject( true );
         }
         finally
         {
@@ -855,7 +865,7 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
                 catch ( IllegalStateException e )
                 {
                     log(
-                            LogService.LOG_INFO,
+                            LogService.LOG_WARNING,
                             "Could not obtain all required dependencies, getService returning null",
                             null );
                     success = false;
@@ -869,7 +879,8 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
                         S result = getService( );
                         if ( result == null )
                         {
-                            success = false;;
+                        	log( LogService.LOG_WARNING, "getService for "+getClassName()+" returned false. See log for details", null);
+                            success = false;
                         }
                         else
                         {
@@ -896,6 +907,7 @@ public class SingleComponentManager<S> extends AbstractComponentManager<S> imple
         //should be write locked
         if (!isEnabled())
         {
+        	log( LogService.LOG_WARNING, "getService for "+getClassName()+" returned null because the component is not enabled.", null);
             return null;
         }
 
