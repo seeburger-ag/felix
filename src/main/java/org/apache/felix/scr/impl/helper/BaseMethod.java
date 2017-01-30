@@ -111,7 +111,7 @@ abstract class BaseMethod
     }
 
 
-    void setMethod( Method method, SimpleLogger logger )
+    synchronized void setMethod( Method method, SimpleLogger logger )
     {
         this.m_method = method;
 
@@ -166,7 +166,7 @@ abstract class BaseMethod
         final String targetPackage = getPackageName( targetClass );
         Class theClass = targetClass;
 
-        while (true) 
+        while (true)
         {
 
             if ( logger.isLogEnabled( LogService.LOG_DEBUG ) )
@@ -555,7 +555,7 @@ abstract class BaseMethod
         private static final State INSTANCE = new NotResolved();
 
 
-        private synchronized void resolve( final BaseMethod baseMethod, SimpleLogger logger )
+        private void resolve( final BaseMethod baseMethod, SimpleLogger logger )
         {
             logger.log( LogService.LOG_DEBUG, "getting {0}: {1}", new Object[]
                     {baseMethod.getMethodNamePrefix(), baseMethod.getMethodName()}, null );
