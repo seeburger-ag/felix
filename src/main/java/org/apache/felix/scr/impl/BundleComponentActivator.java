@@ -47,7 +47,6 @@ import org.osgi.framework.ServiceReference;
 import org.osgi.service.component.ComponentException;
 import org.osgi.service.log.LogService;
 import org.osgi.util.tracker.ServiceTracker;
-import org.slf4j.LoggerFactory;
 
 
 /**
@@ -82,7 +81,6 @@ public class BundleComponentActivator implements Logger
     // the configuration
     private final ScrConfiguration m_configuration;
 
-    private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(Activator.class);
 
     /**
      * Called upon starting of the bundle. This method invokes initialize() which
@@ -355,7 +353,7 @@ public class BundleComponentActivator implements Logger
             m_logService.close();
             m_closeLatch.countDown();
         }
-        else
+        else 
         {
             try
             {
@@ -594,57 +592,40 @@ public class BundleComponentActivator implements Logger
      */
     public void log( int level, String message, ComponentMetadata metadata, Long componentId, Throwable ex )
     {
-		switch (level) {
-		case LogService.LOG_DEBUG:
-			LOG.debug(message,ex);
-			break;
-		case LogService.LOG_INFO:
-			LOG.info(message,ex);
-			break;
-		case LogService.LOG_WARNING:
-			LOG.warn(message,ex);
-			break;
-		case LogService.LOG_ERROR:
-			LOG.error(message,ex);
-			break;
-		default:
-			LOG.info(message,ex);
-			break;
-		}
-//        if ( isLogEnabled( level ) )
-//        {
-//            // prepend the metadata name to the message
-//            if ( metadata != null )
-//            {
-//                if ( componentId != null )
-//                {
-//                    message = "[" + metadata.getName() + "(" + componentId + ")] " + message;
-//                }
-//                else
-//                {
-//                    message = "[" + metadata.getName() + "] " + message;
-//                }
-//            }
-//
-//            ServiceTracker logService = m_logService;
-//            if ( logService != null )
-//            {
-//                Object logger = logService.getService();
-//                if ( logger == null )
-//                {
-//                    Activator.log( level, m_bundle, message, ex );
-//                }
-//                else
-//                {
-//                    ( ( LogService ) logger ).log( level, message, ex );
-//                }
-//            }
-//            else
-//            {
-//                // BCA has been disposed off, bundle context is probably invalid. Try to log something.
-//                Activator.log( level, null, message, ex );
-//            }
-//        }
+        if ( isLogEnabled( level ) )
+        {
+            // prepend the metadata name to the message
+            if ( metadata != null )
+            {
+                if ( componentId != null )
+                {
+                    message = "[" + metadata.getName() + "(" + componentId + ")] " + message;
+                }
+                else
+                {
+                    message = "[" + metadata.getName() + "] " + message;
+                }
+            }
+
+            ServiceTracker logService = m_logService;
+            if ( logService != null )
+            {
+                Object logger = logService.getService();
+                if ( logger == null )
+                {
+                    Activator.log( level, m_bundle, message, ex );
+                }
+                else
+                {
+                    ( ( LogService ) logger ).log( level, message, ex );
+                }
+            }
+            else
+            {
+                // BCA has been disposed off, bundle context is probably invalid. Try to log something.
+                Activator.log( level, null, message, ex );
+            }
+        }
     }
 
     public void missingServicePresent( ServiceReference serviceReference )

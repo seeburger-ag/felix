@@ -35,8 +35,6 @@ import org.osgi.framework.Constants;
 import org.osgi.service.component.ComponentConstants;
 import org.osgi.service.log.LogService;
 import org.osgi.util.tracker.ServiceTracker;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 
 /**
@@ -75,8 +73,6 @@ public class Activator extends AbstractExtender
 
     //  thread acting upon configurations
     private ComponentActorThread m_componentActor;
-
-    private static final Logger LOG = LoggerFactory.getLogger(Activator.class);
 
     public Activator() {
         setSynchronous(true);
@@ -368,81 +364,63 @@ public class Activator extends AbstractExtender
      */
     public static void log( int level, Bundle bundle, String message, Throwable ex )
     {
-		switch (level) {
-		case LogService.LOG_DEBUG:
-			LOG.debug(message,ex);
-			break;
-		case LogService.LOG_INFO:
-			LOG.info(message,ex);
-			break;
-		case LogService.LOG_WARNING:
-			LOG.warn(message,ex);
-			break;
-		case LogService.LOG_ERROR:
-			LOG.error(message,ex);
-			break;
-		default:
-			LOG.info(message,ex);
-			break;
-		}
+        if ( isLogEnabled( level ) )
+        {
+            ServiceTracker t = m_logService;
+            Object logger = ( t != null ) ? t.getService() : null;
+            if ( logger == null )
+            {
+                // output depending on level
+                PrintStream out = ( level == LogService.LOG_ERROR ) ? System.err : System.out;
 
-//        if ( isLogEnabled( level ) )
-//        {
-//            ServiceTracker t = m_logService;
-//            Object logger = ( t != null ) ? t.getService() : null;
-//            if ( logger == null )
-//            {
-//                // output depending on level
-//                PrintStream out = ( level == LogService.LOG_ERROR ) ? System.err : System.out;
-//
-//                // level as a string
-//                StringBuffer buf = new StringBuffer();
-//                switch ( level )
-//                {
-//                    case ( LogService.LOG_DEBUG     ):
-//                        buf.append( "DEBUG: " );
-//                        break;
-//                    case ( LogService.LOG_INFO     ):
-//                        buf.append( "INFO : " );
-//                        break;
-//                    case ( LogService.LOG_WARNING     ):
-//                        buf.append( "WARN : " );
-//                        break;
-//                    case ( LogService.LOG_ERROR     ):
-//                        buf.append( "ERROR: " );
-//                        break;
-//                    default:
-//                        buf.append( "UNK  : " );
-//                        break;
-//                }
-//
-//                // bundle information
-//                if ( bundle != null )
-//                {
-//                    buf.append( bundle.getSymbolicName() );
-//                    buf.append( " (" );
-//                    buf.append( bundle.getBundleId() );
-//                    buf.append( "): " );
-//                }
-//
-//                // the message
-//                buf.append( message );
-//
-//                // keep the message and the stacktrace together
-//                synchronized ( out)
-//                {
-//                    out.println( buf );
-//                    if ( ex != null )
-//                    {
-//                        ex.printStackTrace( out );
-//                    }
-//                }
-//            }
-//            else
-//            {
-//                ( ( LogService ) logger ).log( level, message, ex );
-//            }
-//        }
+                // level as a string
+                StringBuffer buf = new StringBuffer();
+                switch ( level )
+                {
+                    case ( LogService.LOG_DEBUG     ):
+                        buf.append( "DEBUG: " );
+                        break;
+                    case ( LogService.LOG_INFO     ):
+                        buf.append( "INFO : " );
+                        break;
+                    case ( LogService.LOG_WARNING     ):
+                        buf.append( "WARN : " );
+                        break;
+                    case ( LogService.LOG_ERROR     ):
+                        buf.append( "ERROR: " );
+                        break;
+                    default:
+                        buf.append( "UNK  : " );
+                        break;
+                }
+
+                // bundle information
+                if ( bundle != null )
+                {
+                    buf.append( bundle.getSymbolicName() );
+                    buf.append( " (" );
+                    buf.append( bundle.getBundleId() );
+                    buf.append( "): " );
+                }
+
+                // the message
+                buf.append( message );
+
+                // keep the message and the stacktrace together
+                synchronized ( out)
+                {
+                    out.println( buf );
+                    if ( ex != null )
+                    {
+                        ex.printStackTrace( out );
+                    }
+                }
+            }
+            else
+            {
+                ( ( LogService ) logger ).log( level, message, ex );
+            }
+        }
     }
 
 

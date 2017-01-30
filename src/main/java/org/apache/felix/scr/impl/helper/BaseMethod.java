@@ -166,7 +166,7 @@ abstract class BaseMethod
         final String targetPackage = getPackageName( targetClass );
         Class theClass = targetClass;
 
-        while (true)
+        while (true) 
         {
 
             if ( logger.isLogEnabled( LogService.LOG_DEBUG ) )
@@ -361,9 +361,8 @@ abstract class BaseMethod
                         buf.append( ", " );
                     }
                 }
-                buf.append( ") in class class " ).append( clazz.getName() ).append( ". Assuming no such method." ).append(cdfe.toString());
-                logger.log( LogService.LOG_WARNING, buf.toString(), null);
-                logger.log( LogService.LOG_DEBUG, buf.toString(), null);
+                buf.append( ") in class class " ).append( clazz.getName() ).append( ". Assuming no such method." );
+                logger.log( LogService.LOG_WARNING, buf.toString(), cdfe );
             }
         }
         catch ( SuitableMethodNotAccessibleException e)

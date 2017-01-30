@@ -124,13 +124,6 @@
             <scope>provided</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>1.7.9</version>
-            <scope>provided</scope>
-        </dependency>
-
         <!-- Integration Testing with Pax Exam -->
         <dependency>
             <groupId>org.ops4j.pax.exam</groupId>
@@ -327,8 +320,7 @@
                                 import is only used if the framework decides to
                                 wire the bundle to another API provider.
                             -->
-                            org.apache.felix.scr;provide:=true,
-                            org.slf4j*
+                            org.apache.felix.scr;provide:=true
                         </Import-Package>
                         <DynamicImport-Package>
                             <!--
