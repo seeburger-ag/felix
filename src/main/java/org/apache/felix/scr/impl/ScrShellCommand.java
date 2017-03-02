@@ -63,12 +63,12 @@ class ScrShellCommand implements Command
     public void execute(String commandLine, PrintStream out, PrintStream err)
     {
         // Parse the commandLine to get the OBR command.
-        String[] st = commandLine.split("//s");
+        String[] st = commandLine.split("\\s+");
         // Ignore the invoking command.
         // Try to get the OBR command, default is HELP command.
         String command = st.length > 1? st[1]: HELP_CMD;
         String arg = (st.length > 2) ? st[2] : null;
-        
+
         // Perform the specified command.
         if (command.equals(HELP_CMD))
         {
