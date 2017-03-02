@@ -26,7 +26,6 @@ import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -387,7 +386,7 @@ public class ComponentRegistry implements ScrService, ServiceListener
      */
     final void registerComponentHolder( final ComponentRegistryKey key, ComponentHolder componentHolder )
     {
-        Activator.log(LogService.LOG_DEBUG, null, 
+        Activator.log(LogService.LOG_DEBUG, null,
                 "Registering component with pid {0} for bundle {1}",
                 new Object[] {componentHolder.getComponentMetadata().getConfigurationPid(),key.getBundleId()},
                 null);
@@ -420,7 +419,7 @@ public class ComponentRegistry implements ScrService, ServiceListener
             }
             set.add(componentHolder);
         }
-        
+
         if (configurationSupport != null)
         {
             configurationSupport.configureComponentHolder(componentHolder);
@@ -510,7 +509,7 @@ public class ComponentRegistry implements ScrService, ServiceListener
         }
 
         if (component != null) {
-            Activator.log(LogService.LOG_DEBUG, null, 
+            Activator.log(LogService.LOG_DEBUG, null,
                     "Unregistering component with pid {0} for bundle {1}",
                     new Object[] {component.getComponentMetadata().getConfigurationPid(), key.getBundleId()}, null);
             synchronized (m_componentHoldersByPid)
@@ -634,7 +633,7 @@ public class ComponentRegistry implements ScrService, ServiceListener
                 // set to request a bundle to be lazily activated. So in this
                 // simple check we just verify the header is set to assume
                 // the bundle is considered a lazily activated bundle
-                return bundle.getHeaders().get( Constants.BUNDLE_ACTIVATIONPOLICY ) != null;
+                return bundle.getHeaders("").get(Constants.BUNDLE_ACTIVATIONPOLICY) != null;
             }
         }
 

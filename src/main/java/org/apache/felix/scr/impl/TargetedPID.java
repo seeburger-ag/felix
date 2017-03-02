@@ -21,12 +21,11 @@ package org.apache.felix.scr.impl;
 import org.apache.felix.scr.impl.config.ComponentHolder;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.Constants;
-import org.osgi.framework.ServiceReference;
 import org.osgi.framework.Version;
 
 /**
  * Copied with modifications from felix configadmin.
- * 
+ *
  * The <code>TargetedPID</code> class represents a targeted PID as read
  * from a configuration object.
  * <p>
@@ -71,7 +70,7 @@ public class TargetedPID
      */
     public static String getBundleVersion( final Bundle bundle )
     {
-        Object vHeader = bundle.getHeaders().get( Constants.BUNDLE_VERSION );
+        Object vHeader = bundle.getHeaders("").get( Constants.BUNDLE_VERSION );
         Version version = ( vHeader == null ) ? Version.emptyVersion : new Version( vHeader.toString() );
         return version.toString();
     }

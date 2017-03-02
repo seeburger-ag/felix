@@ -111,7 +111,7 @@ public class BundleComponentActivator implements Logger
                 new Object[] {m_bundle.getBundleId()}, null, null, null );
 
         // Get the Metadata-Location value from the manifest
-        String descriptorLocations = ( String ) m_bundle.getHeaders().get( "Service-Component" );
+        String descriptorLocations = (String) m_bundle.getHeaders("").get("Service-Component");
         if ( descriptorLocations == null )
         {
             throw new ComponentException( "Service-Component entry not found in the manifest" );
@@ -353,7 +353,7 @@ public class BundleComponentActivator implements Logger
             m_logService.close();
             m_closeLatch.countDown();
         }
-        else 
+        else
         {
             try
             {

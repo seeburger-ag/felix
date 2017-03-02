@@ -31,7 +31,6 @@ import org.apache.felix.utils.extender.AbstractExtender;
 import org.apache.felix.utils.extender.Extension;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.Constants;
 import org.osgi.service.component.ComponentConstants;
 import org.osgi.service.log.LogService;
 import org.osgi.util.tracker.ServiceTracker;
@@ -106,7 +105,7 @@ public class Activator extends AbstractExtender
 
         // log SCR startup
         log( LogService.LOG_INFO, m_bundle, " Version = {0}",
-            new Object[] {m_bundle.getHeaders().get( Constants.BUNDLE_VERSION )}, null );
+             new Object[] { m_bundle.getVersion().toString() }, null);
 
         // create and start the component actor
         m_componentActor = new ComponentActorThread();
@@ -210,7 +209,7 @@ public class Activator extends AbstractExtender
      */
     private void loadComponents( Bundle bundle )
     {
-        if ( bundle.getHeaders().get( "Service-Component" ) == null )
+        if (bundle.getHeaders("").get(ComponentConstants.SERVICE_COMPONENT) == null)
         {
             // no components in the bundle, abandon
             return;
