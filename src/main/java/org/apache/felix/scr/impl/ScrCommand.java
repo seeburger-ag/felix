@@ -18,7 +18,6 @@
  */
 package org.apache.felix.scr.impl;
 
-import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -27,7 +26,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Dictionary;
 import java.util.Hashtable;
-import java.util.Iterator;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
@@ -54,7 +52,7 @@ public class ScrCommand implements ScrInfo
     private final BundleContext bundleContext;
     private final ScrService scrService;
     private final ScrConfiguration scrConfiguration;
-    
+
     private ServiceRegistration reg;
 
     static ScrCommand register(BundleContext bundleContext, ScrService scrService, ScrConfiguration scrConfiguration)
@@ -119,7 +117,7 @@ public class ScrCommand implements ScrInfo
 
     // ---------- Actual implementation
 
-    
+
     public void update( boolean infoAsService )
     {
         if (infoAsService)
@@ -141,7 +139,7 @@ public class ScrCommand implements ScrInfo
             }
         }
     }
-    
+
     /* (non-Javadoc)
      * @see org.apache.felix.scr.impl.ScrInfo#list(java.lang.String, java.io.PrintStream, java.io.PrintStream)
      */
@@ -200,16 +198,16 @@ public class ScrCommand implements ScrInfo
             }
         }
 
-        Arrays.sort( components, new Comparator<Component>() 
+        Arrays.sort( components, new Comparator<Component>()
                 {
 
                     public int compare(Component c1, Component c2)
                     {
                         return Long.signum(c1.getId() - c2.getId());
                     }
-            
+
                 });
-        
+
         out.println(" Id   State BundleId Name");
         for ( Component component : components )
         {
@@ -229,7 +227,7 @@ public class ScrCommand implements ScrInfo
             return;
         }
 
-        Arrays.sort( components, new Comparator<Component>() 
+        Arrays.sort( components, new Comparator<Component>()
                 {
 
                     public int compare(Component c1, Component c2)
@@ -242,16 +240,16 @@ public class ScrCommand implements ScrInfo
                         }
                         return result;
                     }
-            
+
                 });
-        
+
         long bundleId = -1;
 
         for ( Component component : components )
         {
-            if (components.length > 1) 
+            if (components.length > 1)
             {
-                if ( component.getBundle().getBundleId() != bundleId ) 
+                if ( component.getBundle().getBundleId() != bundleId )
                 {
                     if ( bundleId != -1 )
                     {
@@ -322,11 +320,10 @@ public class ScrCommand implements ScrInfo
             if ( services != null )
             {
                 out.print( "Services: " );
-                out.println( services[0] );
-                for ( int i = 1; i < services.length; i++ )
+                for ( String service: services )
                 {
                     out.print( "          " );
-                    out.println( services[i] );
+                    out.println( service );
                 }
                 out.print( "Service Type: " );
                 out.println( component.isServiceFactory() ? "service factory" : "service" );
@@ -517,7 +514,7 @@ public class ScrCommand implements ScrInfo
             }
             catch (NumberFormatException nfe)
             {
-                
+
                 // check whether it is a component name
                 components = scrService.getComponents(componentIdentifier);
             }
