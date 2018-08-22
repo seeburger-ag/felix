@@ -20,6 +20,9 @@ package org.apache.felix.cm.impl.helper;
 
 
 import java.security.AccessControlContext;
+import java.security.AccessController;
+import java.security.DomainCombiner;
+import java.security.Permission;
 import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,7 +32,9 @@ import java.util.List;
 
 import org.apache.felix.cm.impl.CaseInsensitiveDictionary;
 import org.apache.felix.cm.impl.ConfigurationManager;
+import org.apache.felix.cm.impl.Log;
 import org.apache.felix.cm.impl.RankingComparator;
+import org.osgi.framework.Bundle;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.cm.ConfigurationException;
@@ -62,10 +67,11 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
     }
 
 
+    @Override
     public ConfigurationMap<?> addingService( ServiceReference<S> reference )
     {
-        this.cm.log( LogService.LOG_DEBUG, "Registering service {0}", new String[]
-            { ConfigurationManager.toString( reference ) } );
+        Log.logger.log( LogService.LOG_DEBUG, "Registering service {0}", new Object[]
+            { reference } );
 
         final String[] pids = getServicePid( reference );
         final ConfigurationMap<?> configurations = createConfigurationMap( pids );
@@ -77,8 +83,8 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
     @Override
     public void modifiedService( ServiceReference<S> reference, ConfigurationMap<?> service )
     {
-        this.cm.log( LogService.LOG_DEBUG, "Modified service {0}", new String[]
-            { ConfigurationManager.toString( reference ) } );
+        Log.logger.log( LogService.LOG_DEBUG, "Modified service {0}", new Object[]
+            { reference} );
 
         String[] pids = getServicePid( reference );
         if ( service.isDifferentPids( pids ) )
@@ -93,8 +99,8 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
     public void removedService( ServiceReference<S> reference, ConfigurationMap<?> service )
     {
         // just log
-        this.cm.log( LogService.LOG_DEBUG, "Unregistering service {0}", new String[]
-            { ConfigurationManager.toString( reference ) } );
+        Log.logger.log( LogService.LOG_DEBUG, "Unregistering service {0}", new Object[]
+            { reference } );
     }
 
 
@@ -208,10 +214,10 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
     }
 
 
-    protected final Dictionary getProperties( Dictionary<String, ?> rawProperties, ServiceReference service,
+    protected final Dictionary<String, Object> getProperties( Dictionary<String, ?> rawProperties, ServiceReference<?> service,
         String configPid, String factoryPid )
     {
-        Dictionary props = new CaseInsensitiveDictionary( rawProperties );
+        Dictionary<String, Object> props = new CaseInsensitiveDictionary( rawProperties );
         this.cm.callPlugins( props, service, configPid, factoryPid );
         return props;
     }
@@ -224,22 +230,22 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
             final ConfigurationException ce = ( ConfigurationException ) error;
             if ( ce.getProperty() != null )
             {
-                this.cm.log( LogService.LOG_ERROR,
+                Log.logger.log( LogService.LOG_ERROR,
                     "{0}: Updating property {1} of configuration {2} caused a problem: {3}", new Object[]
-                        { ConfigurationManager.toString( target ), ce.getProperty(), pid, ce.getReason(), ce } );
+                        { target , ce.getProperty(), pid, ce.getReason(), ce } );
             }
             else
             {
-                this.cm.log( LogService.LOG_ERROR, "{0}: Updating configuration {1} caused a problem: {2}",
+                Log.logger.log( LogService.LOG_ERROR, "{0}: Updating configuration {1} caused a problem: {2}",
                     new Object[]
-                        { ConfigurationManager.toString( target ), pid, ce.getReason(), ce } );
+                        { target, pid, ce.getReason(), ce } );
             }
         }
         else
         {
             {
-                this.cm.log( LogService.LOG_ERROR, "{0}: Unexpected problem updating configuration {1}", new Object[]
-                    { ConfigurationManager.toString( target ), pid, error } );
+                Log.logger.log( LogService.LOG_ERROR, "{0}: Unexpected problem updating configuration {1}", new Object[]
+                    { target, pid, error } );
             }
 
         }
@@ -286,9 +292,46 @@ public abstract class BaseTracker<S> extends ServiceTracker<S, ConfigurationMap<
     }
 
 
-    protected AccessControlContext getAccessControlContext( final Object ref )
+    AccessControlContext getAccessControlContext( final Bundle bundle )
     {
-        return new AccessControlContext( new ProtectionDomain[]
-            { ref.getClass().getProtectionDomain() } );
+        return new AccessControlContext(AccessController.getContext(), new CMDomainCombiner(bundle));
     }
+
+    private static class CMDomainCombiner implements DomainCombiner {
+        private final CMProtectionDomain domain;
+
+        CMDomainCombiner(Bundle bundle) {
+        	
+        	// FELIX-5908 - Eagerly instantiate this class 
+        	// to avoid a potential NoClassDefFoundError 
+            this.domain = new CMProtectionDomain(bundle);
+        }
+
+        @Override
+        public ProtectionDomain[] combine(ProtectionDomain[] arg0,
+                                          ProtectionDomain[] arg1) {
+            return new ProtectionDomain[] { domain };
+        }
+
+    }
+
+    private static class CMProtectionDomain extends ProtectionDomain {
+
+        private final Bundle bundle;
+
+        CMProtectionDomain(Bundle bundle) {
+            super(null, null);
+            this.bundle = bundle;
+        }
+
+        @Override
+        public boolean implies(Permission permission) {
+            try {
+                return bundle.hasPermission(permission);
+            } catch (IllegalStateException e) {
+                return false;
+            }
+        }
+    }
+
 }

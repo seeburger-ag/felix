@@ -27,7 +27,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import org.apache.felix.gogo.api.Process;
+import org.apache.felix.service.command.Process;
 import org.apache.felix.gogo.runtime.Parser.Pipeline;
 import org.apache.felix.gogo.runtime.Parser.Program;
 import org.apache.felix.gogo.runtime.Parser.Sequence;
@@ -43,6 +43,20 @@ import static org.junit.Assert.fail;
 public class TestParser extends AbstractParserTest
 {
     int beentheredonethat = 0;
+
+    @Test
+    public void testError() {
+        Context context = new Context();
+        context.addCommand("gogo", (Function) (session, arguments) -> {
+            throw new Error(arguments.get(0).toString());
+        }, "error");
+        try {
+            context.execute("error bar");
+            fail("Expected an exception");
+        } catch (Throwable t) {
+            assertEquals("java.util.concurrent.ExecutionException: java.lang.Error: bar", t.toString());
+        }
+    }
 
     @Test
     public void testEvaluatation() throws Exception
@@ -439,6 +453,26 @@ public class TestParser extends AbstractParserTest
     }
 
     @Test
+    public void testClosingSquareBracket()
+    {
+        expectSyntaxError("{ a } }");
+        expectSyntaxError("a }");
+        expectSyntaxError("}");
+        expectSyntaxError("{ a } ]");
+        expectSyntaxError("a ]");
+        expectSyntaxError("]");
+    }
+
+    private void expectSyntaxError(String txt) {
+        try {
+            new Parser(txt).program();
+            fail("Expected a SyntaxError to be thrown");
+        } catch (SyntaxError e) {
+            // ok
+        }
+    }
+
+    @Test
     public void testSimpleValue()
     {
         Program p = new Parser(
@@ -468,13 +502,13 @@ public class TestParser extends AbstractParserTest
 
     public boolean istty(CommandSession session, int fd)
     {
-        return Process.current().isTty(fd);
+        return Process.Utils.current().isTty(fd);
     }
 
     void each(CommandSession session, Collection<Object> list, Function closure)
         throws Exception
     {
-        List<Object> args = new ArrayList<Object>();
+        List<Object> args = new ArrayList<>();
         args.add(null);
         for (Object x : list)
         {

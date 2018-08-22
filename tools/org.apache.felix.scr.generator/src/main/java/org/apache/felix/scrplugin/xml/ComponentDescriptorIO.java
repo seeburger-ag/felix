@@ -19,6 +19,7 @@
 package org.apache.felix.scrplugin.xml;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ import org.apache.felix.scrplugin.Options;
 import org.apache.felix.scrplugin.SCRDescriptorException;
 import org.apache.felix.scrplugin.SCRDescriptorFailureException;
 import org.apache.felix.scrplugin.SpecVersion;
+import org.apache.felix.scrplugin.description.AbstractDescription;
 import org.apache.felix.scrplugin.description.ClassDescription;
 import org.apache.felix.scrplugin.description.ComponentConfigurationPolicy;
 import org.apache.felix.scrplugin.description.ComponentDescription;
@@ -185,32 +187,39 @@ public class ComponentDescriptorIO {
             final Log logger) throws SAXException, IOException, TransformerException {
         logger.info("Writing " + components.size() + " Service Component Descriptors to "
                 + descriptorFile);
-        final ContentHandler contentHandler = IOUtils.getSerializer(descriptorFile);
-        // detect namespace to use
-        final String namespace = module.getOptions().getSpecVersion().getNamespaceUrl();
-
-        contentHandler.startDocument();
-        contentHandler.startPrefixMapping(PREFIX, namespace);
-
-        IOUtils.newline(contentHandler);
-        // wrapper element to generate well formed xml if 0 or more than 1 component
-        int startIndent = 0;
-        if ( components.size() != 1 ) {
-            contentHandler.startElement("", ComponentDescriptorIO.COMPONENTS, ComponentDescriptorIO.COMPONENTS, new AttributesImpl());
+        
+        FileOutputStream fos = new FileOutputStream(descriptorFile);
+        try {
+            final ContentHandler contentHandler = IOUtils.getSerializer(fos);
+            // detect namespace to use
+            final String namespace = module.getOptions().getSpecVersion().getNamespaceUrl();
+    
+            contentHandler.startDocument();
+            contentHandler.startPrefixMapping(PREFIX, namespace);
+    
             IOUtils.newline(contentHandler);
-            startIndent = 1;
+            // wrapper element to generate well formed xml if 0 or more than 1 component
+            int startIndent = 0;
+            if ( components.size() != 1 ) {
+                contentHandler.startElement("", ComponentDescriptorIO.COMPONENTS, ComponentDescriptorIO.COMPONENTS, new AttributesImpl());
+                IOUtils.newline(contentHandler);
+                startIndent = 1;
+            }
+            for (final ComponentContainer component : components) {
+                generateXML(namespace, module, component, contentHandler, startIndent);
+            }
+    
+            // end wrapper element
+            if ( components.size() != 1 ) {
+                contentHandler.endElement("", ComponentDescriptorIO.COMPONENTS, ComponentDescriptorIO.COMPONENTS);
+                IOUtils.newline(contentHandler);
+            }
+            contentHandler.endPrefixMapping(PREFIX);
+            contentHandler.endDocument();
         }
-        for (final ComponentContainer component : components) {
-            generateXML(namespace, module, component, contentHandler, startIndent);
+        finally {
+            fos.close();
         }
-
-        // end wrapper element
-        if ( components.size() != 1 ) {
-            contentHandler.endElement("", ComponentDescriptorIO.COMPONENTS, ComponentDescriptorIO.COMPONENTS);
-            IOUtils.newline(contentHandler);
-        }
-        contentHandler.endPrefixMapping(PREFIX);
-        contentHandler.endDocument();
     }
 
     /**
@@ -253,17 +262,16 @@ public class ComponentDescriptorIO {
         IOUtils.indent(contentHandler, indent);
         contentHandler.startElement(namespace, ComponentDescriptorIO.COMPONENT, ComponentDescriptorIO.COMPONENT_QNAME, ai);
         IOUtils.newline(contentHandler);
-        generateImplementationXML(container, contentHandler, indent+1);
-        if (container.getServiceDescription() != null) {
-            generateServiceXML(container.getServiceDescription(), contentHandler, indent+1);
-        }
         for (final PropertyDescription property : container.getProperties().values()) {
             generatePropertyXML(property, contentHandler, indent+1);
         }
-
+        if (container.getServiceDescription() != null) {
+            generateServiceXML(container.getServiceDescription(), contentHandler, indent+1);
+        }
         for (final ReferenceDescription reference : container.getReferences().values()) {
             generateReferenceXML(component, module, reference, contentHandler, indent+1);
         }
+        generateImplementationXML(container, contentHandler, indent+1);
 
         IOUtils.indent(contentHandler, indent);
         contentHandler.endElement(namespace, ComponentDescriptorIO.COMPONENT, ComponentDescriptorIO.COMPONENT_QNAME);
@@ -462,6 +470,9 @@ public class ComponentDescriptorIO {
         /** XML file location. */
         private final String location;
 
+        /** Properties. */
+        private final List<AbstractDescription> propsAndRefs = new ArrayList<AbstractDescription>();
+
         /** Classloader. */
         private final ClassLoader classLoader;
 
@@ -587,7 +598,7 @@ public class ComponentDescriptorIO {
                             } else {
                                 prop.setValue(attributes.getValue(PROPERTY_ATTR_VALUE));
                             }
-                            this.currentClass.add(prop);
+                            propsAndRefs.add(prop);
                         } else {
                             // hold the property pending as we have a multi value
                             this.pendingProperty = prop;
@@ -620,7 +631,6 @@ public class ComponentDescriptorIO {
                 } else if (localName.equals(SERVICE)) {
 
                     this.currentService = new ServiceDescription(null);
-                    this.currentClass.add(this.currentService);
 
                     if (attributes.getValue(SERVICE_ATTR_FACTORY) != null) {
                         this.currentService.setServiceFactory(Boolean.valueOf(attributes.getValue(SERVICE_ATTR_FACTORY)));
@@ -679,7 +689,7 @@ public class ComponentDescriptorIO {
                         }
                     }
 
-                    this.currentClass.add(ref);
+                    propsAndRefs.add(ref);
                 }
             }
         }
@@ -699,8 +709,18 @@ public class ComponentDescriptorIO {
 
             if (SpecVersion.fromNamespaceUrl(uri) != null) {
                 if (localName.equals(COMPONENT)) {
+                    if ( this.currentClass != null && this.currentService != null ) {
+                        this.currentClass.add(currentService);
+                    }
+                    if ( this.currentClass != null ) {
+                        for(final AbstractDescription d : propsAndRefs) {
+                            this.currentClass.add(d);
+                        }
+                    }
+                    this.propsAndRefs.clear();
                     this.currentClass = null;
                     this.currentComponent = null;
+                    this.currentService = null;
                     this.isComponent = false;
                 } else if (localName.equals(PROPERTY) && this.pendingProperty != null) {
                     // now split the value
@@ -720,7 +740,7 @@ public class ComponentDescriptorIO {
                         }
                         this.pendingProperty.setMultiValue(values);
                     }
-                    this.currentClass.add(this.pendingProperty);
+                    propsAndRefs.add(this.pendingProperty);
                     this.pendingProperty = null;
                 }
             }

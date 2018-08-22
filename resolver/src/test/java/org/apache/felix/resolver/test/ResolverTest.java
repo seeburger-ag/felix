@@ -46,6 +46,7 @@ import org.apache.felix.resolver.test.util.ResourceImpl;
 import org.junit.Test;
 import org.mockito.Mockito;
 import org.osgi.framework.Constants;
+import org.osgi.framework.Version;
 import org.osgi.framework.namespace.BundleNamespace;
 import org.osgi.framework.namespace.HostNamespace;
 import org.osgi.framework.namespace.IdentityNamespace;
@@ -57,6 +58,7 @@ import org.osgi.resource.Resource;
 import org.osgi.resource.Wire;
 import org.osgi.resource.Wiring;
 import org.osgi.service.resolver.ResolutionException;
+import org.osgi.service.resolver.ResolveContext;
 import org.osgi.service.resolver.Resolver;
 
 public class ResolverTest
@@ -445,7 +447,7 @@ public class ResolverTest
         ResourceImpl a1 = new ResourceImpl("A");
         Capability a1_hostCap = addCap(a1, HostNamespace.HOST_NAMESPACE, "A");
 
-        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         Requirement f1_hostReq = addReq(f1, HostNamespace.HOST_NAMESPACE, "A");
         Capability f1_pkgCap = addCap(f1, PackageNamespace.PACKAGE_NAMESPACE, "org.foo.a");
 
@@ -474,7 +476,7 @@ public class ResolverTest
 
         List<Capability> caps = new ArrayList<Capability>();
         caps.add(f1_pkgCap);
-        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci, b1, b_pkgReq1, caps);
+        Map<Resource, List<Wire>> wireMap = resolver.resolveDynamic(rci, wirings.get(b1), b_pkgReq1);
 
         assertEquals(1, wireMap.size());
         List<Wire> wiresB = wireMap.get(b1);
@@ -499,7 +501,7 @@ public class ResolverTest
         ResourceImpl a1 = new ResourceImpl("A");
         Capability a1_hostCap = addCap(a1, HostNamespace.HOST_NAMESPACE, "A");
 
-        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         Requirement f1_hostReq = addReq(f1, HostNamespace.HOST_NAMESPACE, "A");
         Capability f1_pkgCap = addCap(f1, PackageNamespace.PACKAGE_NAMESPACE, "org.foo.a");
 
@@ -525,7 +527,7 @@ public class ResolverTest
         List<Capability> caps = new ArrayList<Capability>();
         caps.add(f1_pkgCap);
         try {
-            resolver.resolve(rci, b1, b_pkgReq1, caps);
+            resolver.resolveDynamic(rci, wirings.get(b1), b_pkgReq1);
             fail("Should fail to dynamic requirement to fragment when host is resolved already.");
         } catch (ResolutionException e) {
             // expected
@@ -536,7 +538,7 @@ public class ResolverTest
         wirings.remove(a1);
         caps.clear();
         caps.add(f1_pkgCap);
-        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci, b1, b_pkgReq1, caps);
+        Map<Resource, List<Wire>> wireMap = resolver.resolveDynamic(rci, wirings.get(b1), b_pkgReq1);
 
         assertEquals(3, wireMap.size());
         List<Wire> wiresB = wireMap.get(b1);
@@ -587,7 +589,7 @@ public class ResolverTest
 
         List<Capability> caps = new ArrayList<Capability>();
         caps.add(c_pkgCap);
-        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci, b1, b_pkgReq1, caps);
+        Map<Resource, List<Wire>> wireMap = resolver.resolveDynamic(rci, wirings.get(b1), b_pkgReq1);
 
         assertEquals(0, wireMap.size());
     }
@@ -603,7 +605,7 @@ public class ResolverTest
         ResourceImpl a1 = new ResourceImpl("A");
         Capability a1_hostCap = addCap(a1, HostNamespace.HOST_NAMESPACE, "A");
 
-        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         Requirement f1_hostReq = addReq(f1, HostNamespace.HOST_NAMESPACE, "A");
         Capability f1_pkgCap = addCap(f1, PackageNamespace.PACKAGE_NAMESPACE, "org.foo.a");
 
@@ -625,6 +627,203 @@ public class ResolverTest
         // should be wired to A through the fragment capability
         assertEquals(a1, wiresB.get(0).getProvider());
         assertEquals(f1_pkgCap, wiresB.get(0).getCapability());
+    }
+
+    @Test
+    public void testScenario14() throws Exception
+    {
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+
+        Map<Resource, Wiring> wirings = new HashMap<Resource, Wiring>();
+        Map<Requirement, List<Capability>> candMap = new HashMap<Requirement, List<Capability>>();
+
+        ResourceImpl a1 = new ResourceImpl("A", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("1.0.0"));
+        Capability a1_hostCap = addCap(a1, HostNamespace.HOST_NAMESPACE, "A");
+        Capability a1_pkgCap = addCap(a1, PackageNamespace.PACKAGE_NAMESPACE, "a");
+        Requirement a1_pkgReq = addReq(a1, PackageNamespace.PACKAGE_NAMESPACE, "a.impl");
+
+        ResourceImpl a2 = new ResourceImpl("A", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("2.0.0"));
+        Capability a2_hostCap = addCap(a2, HostNamespace.HOST_NAMESPACE, "A");
+        Capability a2_pkgCap = addCap(a2, PackageNamespace.PACKAGE_NAMESPACE, "a");
+        Requirement a2_pkgReq = addReq(a2, PackageNamespace.PACKAGE_NAMESPACE, "a.impl");
+
+        ResourceImpl a3 = new ResourceImpl("A", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("3.0.0"));
+        Capability a3_hostCap = addCap(a3, HostNamespace.HOST_NAMESPACE, "A");
+        Capability a3_pkgCap = addCap(a3, PackageNamespace.PACKAGE_NAMESPACE, "a");
+        Requirement a3_pkgReq = addReq(a3, PackageNamespace.PACKAGE_NAMESPACE, "a.impl");
+
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
+        Requirement f1_hostReq = addReq(f1, HostNamespace.HOST_NAMESPACE, "A");
+        Capability f1_pkgCap = addCap(f1, PackageNamespace.PACKAGE_NAMESPACE, "a.impl");
+        Requirement f1_pkgReq = addReq(f1, PackageNamespace.PACKAGE_NAMESPACE, "a");
+
+        ResourceImpl b1 = new ResourceImpl("B");
+        Requirement b_pkgReq1 = addReq(b1, PackageNamespace.PACKAGE_NAMESPACE, "a");
+
+        candMap.put(a1_pkgReq, Collections.singletonList(f1_pkgCap));
+        candMap.put(a2_pkgReq, Collections.singletonList(f1_pkgCap));
+        candMap.put(a3_pkgReq, Collections.singletonList(f1_pkgCap));
+        candMap.put(b_pkgReq1, Arrays.asList(a3_pkgCap, a2_pkgCap, a1_pkgCap));
+        candMap.put(f1_pkgReq, Arrays.asList(a3_pkgCap, a2_pkgCap, a1_pkgCap));
+        candMap.put(f1_hostReq, Arrays.asList(a3_hostCap, a2_hostCap, a1_hostCap));
+
+
+        ResolveContextImpl rci = new ResolveContextImpl(wirings, candMap, Arrays.<Resource> asList(b1, a1, a2, a3), Collections.<Resource> emptyList());
+
+        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci);
+
+        // all bundles should be resolved
+        assertEquals(5, wireMap.size());
+        List<Wire> wiresB = wireMap.get(b1);
+        assertNotNull(wiresB);
+        assertEquals(1, wiresB.size());
+        assertEquals(a3, wiresB.get(0).getProvider());
+        assertEquals(a3_pkgCap, wiresB.get(0).getCapability());
+
+        // There should be three hosts
+        List<Wire> wiresF1 = wireMap.get(f1);
+        assertNotNull(wiresF1);
+        assertEquals(3, wiresF1.size());
+    }
+
+    @Test
+    public void testScenario15() throws Exception
+    {
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+
+        Map<Requirement, List<Capability>> candMap = new HashMap<Requirement, List<Capability>>();
+
+        ResourceImpl exporter = new ResourceImpl("exporter", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("1.0.0"));
+        Capability exporter_hostCap = addCap(exporter, HostNamespace.HOST_NAMESPACE, "exporter");
+        Capability exporter_pkgCap = addCap(exporter, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl exporterFrag = new ResourceImpl("exporter.frag", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
+        Requirement exporterFrag_hostReq = addReq(exporterFrag, HostNamespace.HOST_NAMESPACE, "exporter");
+
+        ResourceImpl host1 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("1.0.0"));
+        Capability host1_hostCap = addCap(host1, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host1_pkgReq = addReq(host1, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host2 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("2.0.0"));
+        Capability host2_hostCap = addCap(host2, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host2_pkgReq = addReq(host2, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host3 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("3.0.0"));
+        Capability host3_hostCap = addCap(host3, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host3_pkgReq = addReq(host3, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host4 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("4.0.0"));
+        Capability host4_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host4_pkgReq = addReq(host4, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host5 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("5.0.0"));
+        Capability host5_hostCap = addCap(host5, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host5_pkgReq = addReq(host5, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host6 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("6.0.0"));
+        Capability host6_hostCap = addCap(host6, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host6_pkgReq = addReq(host6, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host7 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("7.0.0"));
+        Capability host7_hostCap = addCap(host7, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host7_pkgReq = addReq(host7, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl host8 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("8.0.0"));
+        Capability host8_hostCap = addCap(host8, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement host8_pkgReq = addReq(host8, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl hostFrag = new ResourceImpl("host.frag", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
+        Requirement hostFrag_hostReq = addReq(hostFrag, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement hostFrag_pkgReq = addReq(hostFrag, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        candMap.put(exporterFrag_hostReq, Collections.singletonList(exporter_hostCap));
+        candMap.put(host1_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host2_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host3_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host4_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host5_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host6_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host7_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(host8_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(hostFrag_pkgReq, Collections.singletonList(exporter_pkgCap));
+        candMap.put(hostFrag_hostReq,
+            Arrays.asList(host1_hostCap, host2_hostCap, host3_hostCap, host4_hostCap, host5_hostCap, host6_hostCap, host7_hostCap, host8_hostCap));
+
+        ResolveContextImpl rci = new ResolveContextImpl(Collections.<Resource, Wiring> emptyMap(), candMap,
+            Arrays.<Resource> asList(host1, host2, host3, host4, exporter, exporterFrag, host5, host6, host7, host8, hostFrag),
+            Collections.<Resource> emptyList());
+
+        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci);
+
+        // all bundles should be resolved
+        assertEquals(11, wireMap.size());
+
+        // There should be 8 hosts
+        List<Wire> wiresHostFrag = wireMap.get(hostFrag);
+        assertNotNull(wiresHostFrag);
+        assertEquals(8, wiresHostFrag.size());
+
+        List<Wire> wiresHost1 = wireMap.get(host1);
+        assertNotNull(wiresHost1);
+    }
+
+    @Test
+    public void testScenario16() throws Exception
+    {
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+
+        Map<Requirement, List<Capability>> candMap = new HashMap<Requirement, List<Capability>>();
+
+        ResourceImpl exporter = new ResourceImpl("exporter", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("1.0.0"));
+        Capability exporter_hostCap = addCap(exporter, HostNamespace.HOST_NAMESPACE, "exporter");
+        Capability exporter_pkgCap = addCap(exporter, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        ResourceImpl exporterFrag = new ResourceImpl("exporter.frag", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
+        Requirement exporterFrag_hostReq = addReq(exporterFrag, HostNamespace.HOST_NAMESPACE, "exporter");
+
+        ResourceImpl host1 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("1.0.0"));
+        Capability host1_hostCap = addCap(host1, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host2 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("2.0.0"));
+        Capability host2_hostCap = addCap(host2, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host3 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("3.0.0"));
+        Capability host3_hostCap = addCap(host3, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host4 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("4.0.0"));
+        Capability host4_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host5 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("5.0.0"));
+        Capability host5_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host6 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("6.0.0"));
+        Capability host6_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host7 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("7.0.0"));
+        Capability host7_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl host8 = new ResourceImpl("host", IdentityNamespace.TYPE_BUNDLE, Version.parseVersion("8.0.0"));
+        Capability host8_hostCap = addCap(host4, HostNamespace.HOST_NAMESPACE, "host");
+
+        ResourceImpl hostFrag = new ResourceImpl("host.frag", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
+        Requirement hostFrag_hostReq = addReq(hostFrag, HostNamespace.HOST_NAMESPACE, "host");
+        Requirement hostFrag_pkgReq = addReq(hostFrag, PackageNamespace.PACKAGE_NAMESPACE, "exporter");
+
+        candMap.put(exporterFrag_hostReq, Collections.singletonList(exporter_hostCap));
+        candMap.put(hostFrag_pkgReq, Collections.singletonList(exporter_pkgCap));
+
+        candMap.put(hostFrag_hostReq,
+            Arrays.asList(host1_hostCap, host2_hostCap, host3_hostCap, host4_hostCap, host5_hostCap, host6_hostCap, host7_hostCap, host8_hostCap));
+
+        ResolveContextImpl rci = new ResolveContextImpl(Collections.<Resource, Wiring> emptyMap(), candMap,
+            Arrays.<Resource> asList(host1, host2, host3, host4, exporter, exporterFrag, hostFrag, host5, host6, host7, host8),
+            Collections.<Resource> emptyList());
+
+        Map<Resource, List<Wire>> wireMap = resolver.resolve(rci);
+
+        // all bundles should be resolved
+        assertEquals(11, wireMap.size());
+
     }
 
     @Test
@@ -656,6 +855,241 @@ public class ResolverTest
         map3.put(res3, pkgs3);
         assertEquals(srcCaps3, m.invoke(null, cap3, map3));
 
+    }
+
+    @Test
+    public void testScenario17_1() throws Exception
+    {
+        ResolveContext rci = populateScenario17(false, false, false);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario17_2() throws Exception
+    {
+        ResolveContext rci = populateScenario17(false, false, true);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario17_3() throws Exception
+    {
+        ResolveContext rci = populateScenario17(true, false, false);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario17_4() throws Exception
+    {
+        ResolveContext rci = populateScenario17(true, false, true);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario17_5() throws Exception
+    {
+        ResolveContext rci = populateScenario17(false, true, true);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario17_6() throws Exception
+    {
+        ResolveContext rci = populateScenario17(true, true, true);
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    @Test
+    public void testScenario18() throws Exception
+    {
+        ResolveContext rci = populateScenario18();
+        ResolverImpl resolver = new ResolverImpl(new Logger(Logger.LOG_DEBUG), 1);
+        resolver.resolve(rci);
+    }
+
+    private ResolveContext populateScenario17(boolean realSubstitute,
+        boolean felixResolveContext, boolean existingWirings)
+    {
+        Map<Requirement, List<Capability>> candMap = new HashMap<Requirement, List<Capability>>();
+        ResourceImpl core = new ResourceImpl("core");
+        Capability core_pkgCap = addCap(core, PackageNamespace.PACKAGE_NAMESPACE, "pkg1");
+        Capability core_bundleCap = addCap(core, BundleNamespace.BUNDLE_NAMESPACE,
+            "core");
+        Requirement core_pkgReq = addReq(core, PackageNamespace.PACKAGE_NAMESPACE,
+            "pkg1");
+
+        ResourceImpl misc = new ResourceImpl("misc");
+        Capability misc_pkgCap = addCap(misc, PackageNamespace.PACKAGE_NAMESPACE, "pkg1");
+        Capability misc_bundleCap = addCap(misc, BundleNamespace.BUNDLE_NAMESPACE,
+            "misc");
+        Requirement misc_bundleReq = addReq(misc, BundleNamespace.BUNDLE_NAMESPACE,
+            "core");
+
+        ResourceImpl importsCore = new ResourceImpl("importsCore");
+        Capability importsCore_pkgCap = addCap(importsCore,
+            PackageNamespace.PACKAGE_NAMESPACE, "pkg2", "pkg1");
+        Requirement importsCore_pkgReq = addReq(importsCore,
+            PackageNamespace.PACKAGE_NAMESPACE, "pkg1");
+
+        ResourceImpl requiresMisc = new ResourceImpl("requiresMisc");
+        Requirement requiresMisc_pkgReq = addReq(requiresMisc,
+            PackageNamespace.PACKAGE_NAMESPACE, "pkg2");
+        Requirement requiresMisc_bundleReq = addReq(requiresMisc,
+            BundleNamespace.BUNDLE_NAMESPACE, "misc");
+
+        ResourceImpl substitutesCore = new ResourceImpl("substitutesCore");
+        Capability substitutesCore_pkgCap = addCap(substitutesCore,
+            PackageNamespace.PACKAGE_NAMESPACE, "pkg1");
+
+        candMap.put(core_pkgReq, Collections.singletonList(
+            realSubstitute ? substitutesCore_pkgCap : core_pkgCap));
+        candMap.put(misc_bundleReq, Collections.singletonList(core_bundleCap));
+        candMap.put(importsCore_pkgReq, Collections.singletonList(
+            realSubstitute ? substitutesCore_pkgCap : core_pkgCap));
+        candMap.put(requiresMisc_pkgReq, Collections.singletonList(importsCore_pkgCap));
+        candMap.put(requiresMisc_bundleReq, Collections.singletonList(misc_bundleCap));
+
+        Map<Resource, List<Wire>> wires = new HashMap<Resource, List<Wire>>();
+        wires.put(substitutesCore, new ArrayList<Wire>());
+        wires.put(core, new ArrayList<Wire>());
+        if (realSubstitute)
+        {
+            wires.get(core).add(new SimpleWire(core_pkgReq, substitutesCore_pkgCap));
+        }
+        wires.put(misc, new ArrayList<Wire>());
+        wires.get(misc).add(new SimpleWire(misc_bundleReq, core_bundleCap));
+
+        Wiring coreWiring = null;
+        Map<Resource, Wiring> wirings = new HashMap<Resource, Wiring>();
+        if (existingWirings)
+        {
+            Map<Resource, List<Wire>> invertedWires = new HashMap<Resource, List<Wire>>();
+            invertedWires.put(substitutesCore, new ArrayList<Wire>());
+            if (realSubstitute)
+            {
+                invertedWires.get(substitutesCore).add(
+                    new SimpleWire(core_pkgReq, substitutesCore_pkgCap));
+            }
+            invertedWires.put(core, new ArrayList<Wire>());
+            invertedWires.get(core).add(new SimpleWire(misc_bundleReq, core_bundleCap));
+            invertedWires.put(misc, new ArrayList<Wire>());
+
+            wirings.put(substitutesCore, new SimpleWiring(substitutesCore,
+                Arrays.asList(substitutesCore_pkgCap), wires, invertedWires));
+
+            coreWiring = new SimpleWiring(core,
+                Arrays.asList(core_bundleCap, core_pkgCap), wires, invertedWires);
+            wirings.put(core, coreWiring);
+            wirings.put(misc, new SimpleWiring(misc,
+                Arrays.asList(misc_bundleCap, misc_pkgCap), wires, invertedWires));
+        }
+        Collection<Resource> mandatory = Collections.<Resource> singletonList(requiresMisc);
+        if (felixResolveContext) {
+            Map<Wiring, List<Wire>> substitutions = new HashMap<Wiring, List<Wire>>();
+            if (realSubstitute && coreWiring != null)
+            {
+                substitutions.put(coreWiring, Arrays.<Wire> asList(
+                    new SimpleWire(core_pkgReq, substitutesCore_pkgCap)));
+            }
+            return new ResolveContextImpl.FelixResolveContextImpl(wirings, candMap,
+                mandatory, Collections.<Resource> emptyList(), substitutions);
+        }
+        else
+        {
+            return new ResolveContextImpl(wirings, candMap, mandatory,
+                Collections.<Resource> emptyList());
+        }
+    }
+
+    private ResolveContext populateScenario18()
+    {
+        Map<Requirement, List<Capability>> candMap = new HashMap<Requirement, List<Capability>>();
+
+        ResourceImpl core1 = new ResourceImpl("core1");
+        Capability core1_pkgCap1 = addCap(core1, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Capability core1_pkgCap2 = addCap(core1, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg2", "corepkg1");
+        Capability core1_pkgCap3 = addCap(core1, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3", "corepkg2");
+
+        ResourceImpl core2 = new ResourceImpl("core2");
+        Capability core2_pkgCap1 = addCap(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Capability core2_pkgCap2 = addCap(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg2", "corepkg1");
+        Capability core2_pkgCap3 = addCap(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3", "corepkg2");
+        Requirement core2_pkgReq1 = addReq(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Requirement core2_pkgReq2 = addReq(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg2");
+        Requirement core2_pkgReq3 = addReq(core2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3");
+
+        ResourceImpl core3 = new ResourceImpl("core3");
+        Capability core3_pkgCap1 = addCap(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Capability core3_pkgCap2 = addCap(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg2", "corepkg1");
+        Capability core3_pkgCap3 = addCap(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3", "corepkg2");
+        Requirement core3_pkgReq1 = addReq(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Requirement core3_pkgReq2 = addReq(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg2");
+        Requirement core3_pkgReq3 = addReq(core3, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3");
+
+        ResourceImpl client1 = new ResourceImpl("client1");
+        Capability client1_pkgCap = addCap(client1, PackageNamespace.PACKAGE_NAMESPACE,
+            "clientpkg1", "corepkg3");
+        Requirement client1_pkgReq1 = addReq(client1, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3");
+
+        ResourceImpl client2 = new ResourceImpl("client2");
+        Capability client2_pkgCap = addCap(client2, PackageNamespace.PACKAGE_NAMESPACE,
+            "clientpkg1", "corepkg3");
+        Requirement client2_pkgReq1 = addReq(client2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg3");
+
+        ResourceImpl bundle1 = new ResourceImpl("bundle1");
+        Requirement bundle1_pkgReq1 = addReq(bundle1, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+        Requirement bundle1_pkgReq2 = addReq(bundle1, PackageNamespace.PACKAGE_NAMESPACE,
+            "clientpkg1");
+
+        ResourceImpl bundle2 = new ResourceImpl("bundle2");
+        Requirement bundle2_pkgReq1 = addReq(bundle2, PackageNamespace.PACKAGE_NAMESPACE,
+            "corepkg1");
+
+        candMap.put(core2_pkgReq1, Arrays.asList(core3_pkgCap1, core2_pkgCap1));
+        candMap.put(core2_pkgReq2, Arrays.asList(core3_pkgCap2, core2_pkgCap2));
+        candMap.put(core2_pkgReq3, Arrays.asList(core3_pkgCap3, core2_pkgCap3));
+
+        candMap.put(core3_pkgReq1, Arrays.asList(core3_pkgCap1, core2_pkgCap1));
+        candMap.put(core3_pkgReq2, Arrays.asList(core3_pkgCap2, core2_pkgCap2));
+        candMap.put(core3_pkgReq3, Arrays.asList(core3_pkgCap3, core2_pkgCap3));
+
+        candMap.put(client1_pkgReq1,
+            Arrays.asList(core3_pkgCap3, core2_pkgCap3, core1_pkgCap3));
+        candMap.put(client2_pkgReq1, Arrays.asList(core3_pkgCap3));
+
+        candMap.put(bundle1_pkgReq1, Arrays.asList(core1_pkgCap1));
+        candMap.put(bundle1_pkgReq2, Arrays.asList(client1_pkgCap));
+
+        candMap.put(bundle2_pkgReq1, Arrays.asList(core3_pkgCap1));
+
+        Collection<Resource> mandatory = Arrays.<Resource> asList(core1, core2, core3,
+            client1, client2, bundle1, bundle2);
+        return new ResolveContextImpl(Collections.<Resource, Wiring> emptyMap(), candMap,
+            mandatory, Collections.<Resource> emptyList());
     }
 
     private static String getResourceName(Resource r)
@@ -918,12 +1352,12 @@ public class ResolverTest
         a1_hostCap.addAttribute(HostNamespace.HOST_NAMESPACE, "A");
         a1.addCapability(a1_hostCap);
 
-        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         GenericRequirement f1_hostReq = new GenericRequirement(f1, HostNamespace.HOST_NAMESPACE);
         f1_hostReq.addDirective(Namespace.REQUIREMENT_FILTER_DIRECTIVE, "(" + HostNamespace.HOST_NAMESPACE + "=A)");
         f1.addRequirement(f1_hostReq);
 
-        ResourceImpl f2 = new ResourceImpl("F2", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f2 = new ResourceImpl("F2", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         GenericRequirement f2_hostReq = new GenericRequirement(f2, HostNamespace.HOST_NAMESPACE);
         f2_hostReq.addDirective(Namespace.REQUIREMENT_FILTER_DIRECTIVE, "(" + HostNamespace.HOST_NAMESPACE + "=A)");
         f2.addRequirement(f2_hostReq);
@@ -989,7 +1423,7 @@ public class ResolverTest
         ResourceImpl a1 = new ResourceImpl("A");
         Capability a1_hostCap = addCap(a1, HostNamespace.HOST_NAMESPACE, "A");
 
-        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT);
+        ResourceImpl f1 = new ResourceImpl("F1", IdentityNamespace.TYPE_FRAGMENT, Version.emptyVersion);
         Requirement f1_hostReq = addReq(f1, HostNamespace.HOST_NAMESPACE, "A");
         Requirement f1_pkgReq = addReq(f1, PackageNamespace.PACKAGE_NAMESPACE, "org.foo.c");
         Capability f1_pkgCap = addCap(f1, PackageNamespace.PACKAGE_NAMESPACE, "org.foo.a", "org.foo.c");
@@ -1181,3 +1615,4 @@ public class ResolverTest
         }
     }
 }
+

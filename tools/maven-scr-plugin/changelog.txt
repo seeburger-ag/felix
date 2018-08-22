@@ -1,3 +1,35 @@
+Changes from 1.25.0 to 1.26.0
+-----------------------------
+** Bug
+    * [FELIX-5464] - java.lang.NullPointerException at org.apache.felix.scrplugin.helper.ClassScanner.processClass(ClassScanner.java:207)
+    * [FELIX-5729] - NoSuchFieldError when @Reference referenceInterface type different than field type
+    * [FELIX-5730] - Different separators in localization attribute
+    * [FELIX-5771] - Metatype generation via bnd plugin creates incorrect file names
+
+
+Changes from 1.24.0 to 1.25.0
+-----------------------------
+** Bug
+    * [FELIX-5700] - Metatype generation wrongly puts properties files into metatype directory
+
+
+Changes from 1.24.0 to 1.23.0
+---------------------------
+** Bug
+    * [FELIX-5451] - Input/Output streams not properly closed in org.apache.felix.scr.generator
+    * [FELIX-5452] - SCR bnd plugin fails when embedding jars with optional/excluded dependencies
+
+
+Changes from 1.23.0 to 1.22.0
+-----------------------------
+** Improvement
+    * [FELIX-5373] - Improve failure message when enabling metatype and using no or private properties only
+** Bug
+    * [FELIX-5304] - SERVICE_PID property should not be created
+    * [FELIX-5328] - NoClassDefFound not wrapped in the ClassScanner
+    * [FELIX-5345] - Incorrect encoding in metatype props file
+
+
 Changes from 1.22.0 to 1.21.0
 -----------------------------
 ** Bug

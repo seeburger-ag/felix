@@ -25,31 +25,40 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.easymock.EasyMock;
+import org.mockito.Mockito;
 import org.osgi.framework.Bundle;
 
 import junit.framework.TestCase;
 
 public class AnnotationTest extends TestCase
 {
-    
-    public void testNameFixup() throws Exception
+
+    public void testMapIdentifierToKey() throws Exception
     {
-        assertEquals("foo", Annotations.fixup("foo"));
-        assertEquals("foo", Annotations.fixup("$foo"));
-        assertEquals("foo", Annotations.fixup("foo$"));
-        assertEquals("$foo", Annotations.fixup("$$foo"));
-        assertEquals("foobar", Annotations.fixup("foo$bar"));
-        assertEquals("foo$bar", Annotations.fixup("foo$$bar"));
-        assertEquals("foo.", Annotations.fixup("foo_"));
-        assertEquals("foo_", Annotations.fixup("foo__"));
-        assertEquals(".foo", Annotations.fixup("_foo"));
-        assertEquals("_foo", Annotations.fixup("__foo"));
-        assertEquals("foo.bar", Annotations.fixup("foo_bar"));
-        assertEquals("foo_bar", Annotations.fixup("foo__bar"));
-        assertEquals("foo$", Annotations.fixup("foo$$$"));
-        assertEquals("foo_.", Annotations.fixup("foo___"));
-        assertEquals("foo..bar", Annotations.fixup("foo$_$_bar"));
+        assertEquals("foo", Annotations.mapIdentifierToKey("foo"));
+        assertEquals("foo", Annotations.mapIdentifierToKey("$foo"));
+        assertEquals("foo", Annotations.mapIdentifierToKey("foo$"));
+        assertEquals("$foo", Annotations.mapIdentifierToKey("$$foo"));
+        assertEquals("foobar", Annotations.mapIdentifierToKey("foo$bar"));
+        assertEquals("foo$bar", Annotations.mapIdentifierToKey("foo$$bar"));
+        assertEquals("foo.", Annotations.mapIdentifierToKey("foo_"));
+        assertEquals("foo_", Annotations.mapIdentifierToKey("foo__"));
+        assertEquals(".foo", Annotations.mapIdentifierToKey("_foo"));
+        assertEquals("_foo", Annotations.mapIdentifierToKey("__foo"));
+        assertEquals("foo.bar", Annotations.mapIdentifierToKey("foo_bar"));
+        assertEquals("foo_bar", Annotations.mapIdentifierToKey("foo__bar"));
+        assertEquals("foo$", Annotations.mapIdentifierToKey("foo$$$"));
+        assertEquals("foo_.", Annotations.mapIdentifierToKey("foo___"));
+        assertEquals("foo-.bar", Annotations.mapIdentifierToKey("foo$_$_bar"));
+        assertEquals("six-prop", Annotations.mapIdentifierToKey("six$_$prop"));
+        assertEquals("seven$.prop", Annotations.mapIdentifierToKey("seven$$_$prop"));
+    }
+
+    public void testMapTypeNameToKey() throws Exception
+    {
+        assertEquals("service.ranking", Annotations.mapTypeNameToKey("ServiceRanking"));
+        assertEquals("some_value", Annotations.mapTypeNameToKey("Some_Value"));
+        assertEquals("osgi.property", Annotations.mapTypeNameToKey("OSGiProperty"));
     }
 
     public enum E1 {a, b, c}
@@ -66,23 +75,23 @@ public class AnnotationTest extends TestCase
         short shor();
         String string();
     }
-    
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     private Bundle mockBundle() throws ClassNotFoundException
     {
-        Bundle b = EasyMock.createMock(Bundle.class);
-        EasyMock.expect(b.loadClass(String.class.getName())).andReturn((Class) String.class).anyTimes();
-        EasyMock.expect(b.loadClass(Integer.class.getName())).andReturn((Class) Integer.class).anyTimes();
-        EasyMock.replay(b);
+        Bundle b = Mockito.mock(Bundle.class);
+        Mockito.when(b.loadClass(String.class.getName())).thenReturn((Class) String.class);
+        Mockito.when(b.loadClass(Integer.class.getName())).thenReturn((Class) Integer.class);
         return b;
     }
-    
+
     public void testA1() throws Exception
     {
         Map<String, Object> values = allValues();
-        
+
         Object o = Annotations.toObject( A1.class, values, mockBundle(), false);
         assertTrue("expected an A1", o instanceof A1);
-        
+
         A1 a = (A1) o;
         checkA1(a);
     }
@@ -105,10 +114,10 @@ public class AnnotationTest extends TestCase
     public void testA1FromArray() throws Exception
     {
         Map<String, Object> values = arrayValues();
-        
+
         Object o = Annotations.toObject( A1.class, values, mockBundle(), false);
         assertTrue("expected an A1", o instanceof A1);
-        
+
         A1 a = (A1) o;
         assertEquals(true, a.bool());
         assertEquals((byte)12, a.byt());
@@ -136,16 +145,17 @@ public class AnnotationTest extends TestCase
         values.put("lon", "12345678");
         values.put("shor", 3l);
         values.put("string", 3);
+        values.put("array", new String[]{"foo", "bar"});
         return values;
     }
 
     public void testA1NoValues() throws Exception
     {
         Map<String, Object> values = new HashMap<String, Object>();
-        
+
         Object o = Annotations.toObject( A1.class, values, mockBundle(), false);
         assertTrue("expected an A1", o instanceof A1);
-        
+
         A1 a = (A1) o;
         assertEquals(false, a.bool());
         assertEquals((byte)0, a.byt());
@@ -172,15 +182,16 @@ public class AnnotationTest extends TestCase
         long lon() default Long.MIN_VALUE;
         short shor() default -8;
         String string() default "default";
+        String[] array() default {};
     }
-    
+
     public void testA2AllValues() throws Exception
     {
         Map<String, Object> values = allValues();
-        
+
         Object o = Annotations.toObject( A2.class, values, mockBundle(), false);
         assertTrue("expected an A2", o instanceof A2);
-        
+
         A2 a = (A2) o;
         assertEquals(true, a.bool());
         assertEquals((byte)12, a.byt());
@@ -193,8 +204,31 @@ public class AnnotationTest extends TestCase
         assertEquals(12345678l,  a.lon());
         assertEquals((short)3, a.shor());
         assertEquals("3", a.string());
+        assertArrayEquals(new String[]{"foo", "bar"}, a.array());
     }
-    
+
+    public void testA2DefaultValues() throws Exception
+    {
+        Map<String, Object> values = Collections.emptyMap();
+
+        Object o = Annotations.toObject( A2.class, values, mockBundle(), false);
+        assertTrue("expected an A2", o instanceof A2);
+
+        A2 a = (A2) o;
+        assertEquals(false, a.bool());
+        assertEquals((byte)0, a.byt());
+        assertEquals((char)0, a.cha());
+        assertEquals(null, a.clas());
+        assertEquals(null, a.e1());
+        assertEquals(0.0, a.doubl());
+        assertEquals(0.0f, a.floa());
+        assertEquals(0, a.integer());
+        assertEquals(0, a.lon());
+        assertEquals((short)0, a.shor());
+        assertEquals(null, a.string());
+        assertEquals(0, a.array().length);
+    }
+
     public @interface A1Arrays {
         boolean[] bool();
         byte[] byt();
@@ -208,35 +242,35 @@ public class AnnotationTest extends TestCase
         short[] shor();
         String[] string();
     }
-    
+
     public void testA1ArraysNoValues() throws Exception
     {
         Map<String, Object> values = new HashMap<String, Object>();
-        
+
         Object o = Annotations.toObject( A1Arrays.class, values, mockBundle(), false);
         assertTrue("expected an A1Arrays", o instanceof A1Arrays);
-        
+
         A1Arrays a = (A1Arrays) o;
-        assertEquals(null, a.bool());
-        assertEquals(null, a.byt());
-        assertEquals(null, a.cha());
-        assertEquals(null, a.clas());
-        assertEquals(null, a.e1());
-        assertEquals(null, a.doubl());
-        assertEquals(null, a.floa());
-        assertEquals(null, a.integer());
-        assertEquals(null,  a.lon());
-        assertEquals(null, a.shor());
-        assertEquals(null, a.string());
+        assertEquals(0, a.bool().length);
+        assertEquals(0, a.byt().length);
+        assertEquals(0, a.cha().length);
+        assertEquals(0, a.clas().length);
+        assertEquals(0, a.e1().length);
+        assertEquals(0, a.doubl().length);
+        assertEquals(0, a.floa().length);
+        assertEquals(0, a.integer().length);
+        assertEquals(0,  a.lon().length);
+        assertEquals(0, a.shor().length);
+        assertEquals(0, a.string().length);
     }
 
     public void testA1Array() throws Exception
     {
         Map<String, Object> values = allValues();
-        
+
         Object o = Annotations.toObject( A1Arrays.class, values, mockBundle(), false);
         assertTrue("expected an A1Arrays", o instanceof A1Arrays);
-        
+
         A1Arrays a = (A1Arrays) o;
         assertArrayEquals(new boolean[] {true}, a.bool());
         assertArrayEquals(new byte[] {(byte)12}, a.byt());
@@ -261,12 +295,12 @@ public class AnnotationTest extends TestCase
         {
             assertEquals("different value at " + i, Array.get(a, i), Array.get(b, i));
         }
-        
+
     }
 
     private Map<String, Object> arrayValues()
     {
-        Map<String, Object> values = new HashMap();
+        Map<String, Object> values = new HashMap<String, Object>();
         values.put("bool", new boolean[] {true, false});
         values.put("byt", new byte[] {12, 3});
         values.put("cha", new char[] {'c', 'h', 'a', 'r'});
@@ -280,11 +314,11 @@ public class AnnotationTest extends TestCase
         values.put("string", new String[] {});
         return values;
     }
-    
+
     public void testA1ArrayFromArray() throws Exception
     {
         Map<String, Object> values = arrayValues();
-        
+
         doA1ArrayTest(values);
     }
 
@@ -296,13 +330,13 @@ public class AnnotationTest extends TestCase
         {
             collectionValues.put(entry.getKey(), toList(entry.getValue()));
         }
-        
+
         doA1ArrayTest(collectionValues);
     }
 
     private List<?> toList(Object value)
     {
-        List result = new ArrayList();
+        List<Object> result = new ArrayList<Object>();
         for (int i = 0; i < Array.getLength(value); i++)
         {
             result.add(Array.get(value, i));
@@ -314,7 +348,7 @@ public class AnnotationTest extends TestCase
     {
         Object o = Annotations.toObject( A1Arrays.class, values, mockBundle(), false);
         assertTrue("expected an A1Arrays", o instanceof A1Arrays);
-        
+
         A1Arrays a = (A1Arrays) o;
         assertArrayEquals(new boolean[] {true, false}, a.bool());
         assertArrayEquals(new byte[] {12, 3}, a.byt());
@@ -343,15 +377,15 @@ public class AnnotationTest extends TestCase
         A1 a1();
         A1[] a1array();
     }
-    
+
     public void testB1() throws Exception
     {
         Map<String, Object> values = b1Values();
-        
+
         Object o = Annotations.toObject( B1.class, values, mockBundle(), true);
         assertTrue("expected an B1 " + o, o instanceof B1);
         B1 b = (B1) o;
-        checkB1(b);        
+        checkB1(b);
     }
 
     private void checkB1(B1 b)
@@ -401,16 +435,16 @@ public class AnnotationTest extends TestCase
     public void testC1() throws Exception
     {
         Map<String, Object> values = c1Values();
-        
+
         Object o = Annotations.toObject( C1.class, values, mockBundle(), true);
         assertTrue("expected an B1 " + o, o instanceof C1);
         C1 c = (C1) o;
-        checkB1(c.b1());  
+        checkB1(c.b1());
         assertEquals(3, c.b1array().length);
         checkB1(c.b1array()[0]);
         checkB1(c.b1array()[1]);
         checkB1(c.b1array()[2]);
-        
+
     }
 
     private Map<String, Object> c1Values()
@@ -438,7 +472,7 @@ public class AnnotationTest extends TestCase
         short shor();
         String string();
     }
-    
+
     public interface BI1 extends I0 {
         double doubl();
         float floa();
@@ -464,10 +498,10 @@ public class AnnotationTest extends TestCase
     public void testAI1() throws Exception
     {
         Map<String, Object> values = allValues();
-        
+
         Object o = Annotations.toObject( AI1.class, values, mockBundle(), true);
         assertTrue("expected an AI1", o instanceof AI1);
-        
+
         AI1 a = (AI1) o;
         checkAI1(a);
     }
@@ -489,11 +523,11 @@ public class AnnotationTest extends TestCase
     public void testBI1() throws Exception
     {
         Map<String, Object> values = b1Values();
-        
+
         Object o = Annotations.toObject( BI1.class, values, mockBundle(), true);
         assertTrue("expected an B1 " + o, o instanceof BI1);
         BI1 b = (BI1) o;
-        checkBI1(b);        
+        checkBI1(b);
     }
 
     private void checkBI1(BI1 b)
@@ -508,33 +542,33 @@ public class AnnotationTest extends TestCase
     public void testCI1() throws Exception
     {
         Map<String, Object> values = c1Values();
-        
+
         Object o = Annotations.toObject( CI1.class, values, mockBundle(), true);
         assertTrue("expected an B1 " + o, o instanceof CI1);
         CI1 c = (CI1) o;
-        checkBI1(c.b1());  
+        checkBI1(c.b1());
         assertEquals(3, c.b1array().length);
         checkBI1(c.b1array()[0]);
         checkBI1(c.b1array()[1]);
         checkBI1(c.b1array()[2]);
-        
+
     }
-    
+
     class Odd
     {
         private final String content;
-        
+
         public Odd(String content)
         {
             this.content = content;
         }
-        
-        public String getContent() 
+
+        public String getContent()
         {
             return content;
         }
     }
-    
+
     class Odder extends Odd
     {
 
@@ -542,21 +576,21 @@ public class AnnotationTest extends TestCase
         {
             super(content);
         }
-        
+
     }
-    
-    interface OddTest 
+
+    interface OddTest
     {
         Odd odd1();
-        
+
         Odd odd2();
-        
+
         Odd odd3();
-        
+
         Odd odder1();
-        
+
         Odd odder2();
-        
+
         Odd odder3();
     }
 
@@ -569,7 +603,7 @@ public class AnnotationTest extends TestCase
         values.put("odder1", new Odder("one"));
         values.put("odder2", Collections.singletonList(new Odder("two")));
         values.put("odder3", new Odder[] {new Odder("three"), new Odder("four")});
-        
+
         Object o = Annotations.toObject(OddTest.class, values, mockBundle(), true);
         assertTrue("expected an OddTest", o instanceof OddTest);
         OddTest ot = (OddTest)o;
@@ -580,13 +614,77 @@ public class AnnotationTest extends TestCase
         assertOdder("two", ot.odder2());
         assertOdder("three", ot.odder3());
     }
-    
+
+    public @interface SETest1 {
+        String value();
+    }
+
+    public @interface SETest2 {
+        boolean foo() default true;
+        String value();
+    }
+
+    public @interface SETest3 {
+        boolean foo();
+        String value();
+    }
+
+    public @interface SETest4 {
+        boolean foo();
+        String values();
+    }
+
+    public @interface PrefixTest {
+        String PREFIX_ = "org.apache.";
+
+        boolean foo() default true;
+        String[] values() default {"a"};
+        String value();
+    }
+
+    public void testSingleElementAnnotation() throws Exception
+    {
+        assertFalse(Annotations.isSingleElementAnnotation(Map.class));
+        assertTrue(Annotations.isSingleElementAnnotation(SETest1.class));
+        assertTrue(Annotations.isSingleElementAnnotation(SETest2.class));
+        assertFalse(Annotations.isSingleElementAnnotation(SETest3.class));
+        assertFalse(Annotations.isSingleElementAnnotation(SETest4.class));
+    }
+
+    public void testGetPrefix() throws Exception
+    {
+        assertNull(Annotations.getPrefix(Map.class));
+        assertNull(Annotations.getPrefix(SETest1.class));
+        assertNull(Annotations.getPrefix(SETest2.class));
+        assertNull(Annotations.getPrefix(SETest3.class));
+        assertNull(Annotations.getPrefix(SETest4.class));
+        assertNull(Annotations.getPrefix(A1.class));
+        assertEquals("org.apache.", Annotations.getPrefix(PrefixTest.class));
+    }
+
+    public void testMappingWithPrefix() throws Exception
+    {
+        final Map<String, Object> values = new HashMap<String, Object>();
+        values.put("foo", false);
+        values.put("org.apache.foo", true);
+        values.put("values", "false-values");
+        values.put("org.apache.values", "true-values");
+        values.put("value", "false-value");
+        values.put("prefix.test", "true-value");
+
+        final PrefixTest o = Annotations.toObject( PrefixTest.class, values, mockBundle(), true);
+        assertEquals("true-value", o.value());
+        assertEquals(1, o.values().length);
+        assertEquals("true-values", o.values()[0]);
+        assertEquals(true, o.foo());
+    }
+
     private void assertOdd(String expectedContent, Object actual) {
         assertTrue("expected an Odd", actual instanceof Odd);
-        assertEquals("Expected Odd contents", expectedContent, ((Odd)actual).getContent());      
+        assertEquals("Expected Odd contents", expectedContent, ((Odd)actual).getContent());
     }
     private void assertOdder(String expectedContent, Object actual) {
         assertTrue("expected an Odder", actual instanceof Odder);
-        assertEquals("Expected Odd contents", expectedContent, ((Odder)actual).getContent());      
+        assertEquals("Expected Odd contents", expectedContent, ((Odder)actual).getContent());
     }
 }

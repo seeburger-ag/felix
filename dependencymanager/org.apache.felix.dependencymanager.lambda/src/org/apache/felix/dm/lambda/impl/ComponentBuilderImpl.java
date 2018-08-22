@@ -38,6 +38,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.apache.felix.dm.Component;
+import org.apache.felix.dm.ComponentStateListener;
 import org.apache.felix.dm.Dependency;
 import org.apache.felix.dm.DependencyManager;
 import org.apache.felix.dm.context.ComponentContext;
@@ -53,6 +54,7 @@ import org.apache.felix.dm.lambda.callbacks.InstanceCbComponent;
 
 public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderImpl> {
     private final List<DependencyBuilder<?>> m_dependencyBuilders = new ArrayList<>();
+    private final List<Dependency> m_dependencies = new ArrayList<>();
     private final Component m_component;
     private final boolean m_componentUpdated;
     private String[] m_serviceNames;
@@ -74,7 +76,8 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
     private Object m_initCallbackInstance;
     private Object m_startCallbackInstance;
     private Object m_stopCallbackInstance;
-    private Object m_destroyCallbackInstance;   
+    private Object m_destroyCallbackInstance;
+    private final List<ComponentStateListener> m_listeners = new ArrayList<>();
     
     enum ComponentCallback { INIT, START, STOP, DESTROY };
     
@@ -247,7 +250,7 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
     			throw new IllegalArgumentException("arg0 property name not supported"); 
     		}
     		Object value = property.apply(name);
-    		props.put(name, value);
+    		props.put(convertDots(name), value);
     	});
         m_properties = props;
         return this;
@@ -406,8 +409,14 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
         m_compositionMethod = "getComposition";
         return this;
     }
-
+    
     @Override
+    public ComponentBuilderImpl withDep(Dependency dep) {
+    	m_dependencies.add(dep);
+    	return this;
+    }
+    
+   @Override
     public <U> ComponentBuilderImpl withSvc(Class<U> service, Consumer<ServiceDependencyBuilder<U>> consumer) {
         ServiceDependencyBuilder<U> dep = new ServiceDependencyBuilderImpl<>(m_component, service);
         consumer.accept(dep);
@@ -546,6 +555,11 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
         m_destroyCallbackInstance = null;
         return this;
     }
+        
+    public ComponentBuilderImpl listener(ComponentStateListener listener) {
+    	m_listeners.add(listener);
+    	return this;
+    }
     
     public Component build() {
         if (m_serviceNames != null) {
@@ -555,7 +569,9 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
         if (m_properties != null) {
             m_component.setServiceProperties(m_properties);
         }
-                
+        
+        m_listeners.stream().forEach(m_component::add);
+
         if (! m_componentUpdated) { // Don't override impl or set callbacks if component is being updated
            if (m_impl != null) {               
                m_component.setImplementation(m_impl);
@@ -591,9 +607,10 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
         
         if (m_dependencyBuilders.size() > 0) {
             // add atomically in case we are building some component dependencies from a component init method.
-            // We first transform the list of builders into a stream of built Dependencies, then we collect the result 
-            // to an array of Dependency[].
-            m_component.add(m_dependencyBuilders.stream().map(builder -> builder.build()).toArray(Dependency[]::new));
+        	List<Dependency> depList = new ArrayList<>();
+            m_dependencyBuilders.stream().map(builder -> builder.build()).forEach(depList::add);
+            depList.addAll(m_dependencies);
+            m_component.add(depList.stream().toArray(Dependency[]::new));
         }
         return m_component;
     }
@@ -658,5 +675,22 @@ public class ComponentBuilderImpl implements ComponentBuilder<ComponentBuilderIm
         if (m_hasFactory) {
             throw new IllegalStateException("Can't mix factory method name and factory method reference");
         }
+    }
+    
+    private String convertDots(String propertyName) {
+        StringBuilder sb = new StringBuilder(propertyName);
+        // replace "__" by "_" or "_" by ".": foo_bar -> foo.bar; foo__BAR_zoo -> foo_BAR.zoo
+        for (int i = 0; i < sb.length(); i ++) {
+            if (sb.charAt(i) == '_') {
+                if (i < (sb.length() - 1) && sb.charAt(i+1) == '_') {
+                    // replace foo__bar -> foo_bar
+                    sb.replace(i, i+2, "_");
+                } else {
+                    // replace foo_bar -> foo.bar
+                    sb.replace(i, i+1, ".");
+                }
+            }
+        }
+        return sb.toString();
     }
 }

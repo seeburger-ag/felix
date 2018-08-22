@@ -18,6 +18,15 @@
  */
 package org.apache.felix.framework;
 
+import org.apache.felix.framework.util.Util;
+import org.osgi.framework.Bundle;
+import org.osgi.framework.namespace.HostNamespace;
+import org.osgi.framework.wiring.BundleCapability;
+import org.osgi.framework.wiring.BundleRevision;
+import org.osgi.framework.wiring.BundleRevisions;
+import org.osgi.framework.wiring.BundleWire;
+import org.osgi.framework.wiring.BundleWiring;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,14 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import org.apache.felix.framework.util.Util;
-import org.apache.felix.framework.wiring.BundleWireImpl;
-import org.osgi.framework.Bundle;
-import org.osgi.framework.wiring.BundleCapability;
-import org.osgi.framework.wiring.BundleRevision;
-import org.osgi.framework.wiring.BundleRevisions;
-import org.osgi.framework.wiring.BundleWire;
-import org.osgi.framework.wiring.BundleWiring;
 
 class BundleRevisionDependencies
 {
@@ -98,10 +99,15 @@ class BundleRevisionDependencies
         // are actually reversed (i.e., they require a host, but then
         // the host ends up dependent on them at run time).
         if (Util.isFragment(revision)
-            && (revision.getWiring() != null)
-            && !revision.getWiring().getRequiredWires(null).isEmpty())
+            && (revision.getWiring() != null))
         {
-            return true;
+            for (BundleWire bw : revision.getWiring().getRequiredWires(null))
+            {
+                if (HostNamespace.HOST_NAMESPACE.equals(bw.getCapability().getNamespace()))
+                {
+                    return true;
+                }
+            }
         }
         else if (m_dependentsMap.containsKey(revision))
         {
@@ -170,7 +176,10 @@ class BundleRevisionDependencies
                 {
                     for (BundleWire bw : wiring.getRequiredWires(null))
                     {
-                        result.add(((BundleWireImpl) bw).getProvider().getBundle());
+                        if (HostNamespace.HOST_NAMESPACE.equals(bw.getCapability().getNamespace()))
+                        {
+                            result.add(bw.getProvider().getBundle());
+                        }
                     }
                 }
             }

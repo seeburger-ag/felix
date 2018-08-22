@@ -22,13 +22,13 @@
     <parent>
         <groupId>org.apache.felix</groupId>
         <artifactId>felix-parent</artifactId>
-        <version>3</version>
+        <version>4</version>
         <relativePath>../pom/pom.xml</relativePath>
     </parent>
 
     <artifactId>org.apache.felix.webconsole</artifactId>
     <packaging>bundle</packaging>
-    <version>4.2.17-SNAPSHOT</version>
+    <version>4.3.7-SNAPSHOT</version>
 
     <name>Apache Felix Web Management Console</name>
     <description>
@@ -38,11 +38,9 @@
     </description>
     
     <properties>
-        <felix.java.version>4</felix.java.version>
-        <org.json.version>20070829</org.json.version>
-        <org.json.version.osgi>0.0.0.${org.json.version}</org.json.version.osgi>
+        <felix.java.version>6</felix.java.version>
         <webconsole.exports>
-            org.apache.felix.webconsole;version=3.2.0;provide:=true,
+            org.apache.felix.webconsole;version=3.3.0;provide:=true,
             org.apache.felix.webconsole.bundleinfo;version=1.0.0;provide:=true,
             org.apache.felix.webconsole.i18n;version=1.0.0;provide:=true
         </webconsole.exports>
@@ -95,7 +93,7 @@
             <plugin>
                 <groupId>org.apache.felix</groupId>
                 <artifactId>maven-bundle-plugin</artifactId>
-                <version>2.3.6</version>
+                <version>3.3.0</version>
                 <extensions>true</extensions>
                 <configuration>
                     <instructions>
@@ -115,9 +113,17 @@
                             ${webconsole.exports}
                         </Export-Package>
                         <Import-Package>
-                            org.json.*;version=0,
                             javax.servlet.*;version="[2.4,4)",
                             org.apache.commons.io; version="[1.4,3)",
+                            !org.apache.felix.bundlerepository,
+                            !org.osgi.service.obr,
+                            !org.osgi.service.cm,
+                            !org.osgi.service.condpermadmin,
+                            !org.osgi.service.log,
+                            !org.osgi.service.metatype,
+                            !org.osgi.service.permissionadmin,
+                            !org.osgi.service.prefs,
+                            !org.osgi.service.wireadmin,
                             *
                         </Import-Package>
                         <DynamicImport-Package>
@@ -136,6 +142,7 @@
                         </Include-Resource>
                         <Embed-Dependency>
                             org.apache.felix.utils;inline=org/apache/felix/utils/manifest/**,
+                            org.apache.felix.utils;inline=org/apache/felix/utils/json/**,
                             org.apache.felix.framework;inline=org/apache/felix/framework/util/VersionRange**
                         </Embed-Dependency>
                         <_removeheaders>
@@ -161,8 +168,9 @@
                     </includes>
                     <excludes>
                         <exclude>src/main/appended-resources/**</exclude>
-                        <exclude>src/main/resources/res/lib/jquery-1.8.3.js</exclude>
-                        <exclude>src/main/resources/res/lib/jquery-ui-1.9.2.js</exclude>
+                        <exclude>src/main/resources/res/lib/jquery-3.3.1.js</exclude>
+                        <exclude>src/main/resources/res/lib/jquery-migrate-3.0.0.js</exclude>
+                        <exclude>src/main/resources/res/lib/jquery-ui-1.12.1.js</exclude>
                         <exclude>src/main/resources/res/lib/jquery-ui-i18n-1.7.2.js</exclude>
                         <exclude>src/main/resources/res/lib/autosize.min.js</exclude>
                         <exclude>src/main/resources/res/lib/jquery.cookies-2.2.0.js</exclude>
@@ -183,7 +191,7 @@
        <!--
            The "all-in-one-bundle" profile builds a bundle including certain
            3rd party libraries and classes, namely: Commons IO, Commons
-           FileUpload, JSON, and the OSGi ServiceTracker.
+           FileUpload, and the OSGi ServiceTracker.
            The "all-in-one-bundle" can be used in deployments where these
            dependencies need not be deployed separately.
        -->
@@ -218,13 +226,13 @@
                                             org.apache.commons.io,
                                             org.apache.commons.io.filefilter,
                                             org.apache.commons.io.output,
-                                            org.json;version=${org.json.version.osgi},
                                             org.apache.felix.inventory;version=1.0.0,
                                             ${webconsole.exports}
                                        </Export-Package>
                                        <Embed-Dependency>
                                            <!-- Import/Export-Package parsing -->
                                            org.apache.felix.utils;inline=org/apache/felix/utils/manifest/**,
+                                           org.apache.felix.utils;inline=org/apache/felix/utils/json/**,
                                            org.apache.felix.framework;inline=org/apache/felix/framework/util/VersionRange**,
                                             
                                            <!-- ServiceTracker -->
@@ -367,13 +375,6 @@
         </dependency>
 
         <dependency>
-            <groupId>org.json</groupId>
-            <artifactId>json</artifactId>
-            <version>${org.json.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        
-        <dependency>
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.shell</artifactId>
             <version>1.0.0</version>
@@ -396,7 +397,7 @@
         <dependency>
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.utils</artifactId>
-            <version>1.0.0</version>
+            <version>1.9.0</version>
             <scope>provided</scope>
             <optional>true</optional>
         </dependency>

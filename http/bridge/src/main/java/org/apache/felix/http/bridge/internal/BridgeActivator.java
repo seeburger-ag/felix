@@ -18,9 +18,15 @@
  */
 package org.apache.felix.http.bridge.internal;
 
+import java.io.IOException;
 import java.util.EventListener;
 import java.util.Hashtable;
 
+import javax.servlet.Servlet;
+import javax.servlet.ServletConfig;
+import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServlet;
 
 import org.apache.felix.http.base.internal.AbstractHttpActivator;
@@ -43,8 +49,45 @@ public final class BridgeActivator extends AbstractHttpActivator
     {
         super.doStart();
 
-        // dispatcher servlet
-        final Object servlet = getDispatcherServlet();
+        // check for endpoint registration property
+        final Hashtable<String, Object> serviceRegProps = new Hashtable<String, Object>();
+        if ( getBundleContext().getProperty(FELIX_HTTP_SERVICE_ENDPOINTS) != null )
+        {
+            serviceRegProps.put(HttpServiceRuntimeConstants.HTTP_SERVICE_ENDPOINT,
+                    getBundleContext().getProperty(FELIX_HTTP_SERVICE_ENDPOINTS));
+        }
+        else
+        {
+            serviceRegProps.put(HttpServiceRuntimeConstants.HTTP_SERVICE_ENDPOINT, "/");
+        }
+        final Servlet dispatcherServlet = this.getHttpServiceController().createDispatcherServlet();
+        final Object servlet = new HttpServlet()
+        {
+            private static final long serialVersionUID = -5229577898597483605L;
+
+            @Override
+            public void destroy()
+            {
+                getHttpServiceController().unregister();
+                dispatcherServlet.destroy();
+                super.destroy();
+            }
+
+            @Override
+            public void init(final ServletConfig config) throws ServletException
+            {
+                super.init(config);
+                dispatcherServlet.init(config);
+                getHttpServiceController().register(config.getServletContext(), serviceRegProps);
+            }
+
+            @Override
+            public void service(ServletRequest req, ServletResponse res) throws ServletException, IOException {
+                dispatcherServlet.service(req, res);
+            }
+        };
+
+        // register dispatcher servlet
         Hashtable<String, Object> props = new Hashtable<String, Object>();
         props.put(MARKER_PROP, servlet.getClass().getName());
         props.put(Constants.SERVICE_DESCRIPTION, "Apache Felix Http Dispatcher for bridged request handling");
@@ -52,22 +95,13 @@ public final class BridgeActivator extends AbstractHttpActivator
         getBundleContext().registerService(HttpServlet.class.getName(), servlet, props);
 
         // Http Session event dispatcher
-        final EventDispatcher dispatcher = getEventDispatcher();
+        final EventDispatcher dispatcher = getHttpServiceController(). getEventDispatcher();
         dispatcher.setActive(true);
         props = new Hashtable<String, Object>();
         props.put(MARKER_PROP, dispatcher.getClass().getName());
         props.put(Constants.SERVICE_DESCRIPTION, "Apache Felix Http Dispatcher for bridged event handling");
         props.put(Constants.SERVICE_VENDOR, VENDOR);
         getBundleContext().registerService(EventListener.class.getName(), dispatcher, props);
-
-        // check for endpoint registration property
-        if ( getBundleContext().getProperty(FELIX_HTTP_SERVICE_ENDPOINTS) != null )
-        {
-            final Hashtable<String, Object> serviceRegProps = new Hashtable<String, Object>();
-            serviceRegProps.put(HttpServiceRuntimeConstants.HTTP_SERVICE_ENDPOINT,
-                    getBundleContext().getProperty(FELIX_HTTP_SERVICE_ENDPOINTS));
-            this.getHttpServiceController().setProperties(serviceRegProps);
-        }
 
         SystemLogger.info("Started bridged http services");
     }

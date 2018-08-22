@@ -26,12 +26,14 @@ import org.apache.felix.http.base.internal.registry.ErrorPageRegistry;
 import org.apache.felix.http.base.internal.runtime.AbstractInfo;
 import org.apache.felix.http.base.internal.runtime.FilterInfo;
 import org.apache.felix.http.base.internal.runtime.ListenerInfo;
+import org.apache.felix.http.base.internal.runtime.PreprocessorInfo;
 import org.apache.felix.http.base.internal.runtime.ResourceInfo;
 import org.apache.felix.http.base.internal.runtime.ServletContextHelperInfo;
 import org.apache.felix.http.base.internal.runtime.ServletInfo;
 import org.osgi.service.http.runtime.dto.FailedErrorPageDTO;
 import org.osgi.service.http.runtime.dto.FailedFilterDTO;
 import org.osgi.service.http.runtime.dto.FailedListenerDTO;
+import org.osgi.service.http.runtime.dto.FailedPreprocessorDTO;
 import org.osgi.service.http.runtime.dto.FailedResourceDTO;
 import org.osgi.service.http.runtime.dto.FailedServletContextDTO;
 import org.osgi.service.http.runtime.dto.FailedServletDTO;
@@ -49,14 +51,16 @@ public final class FailedDTOHolder
 
     public final List<FailedErrorPageDTO> failedErrorPageDTOs = new ArrayList<FailedErrorPageDTO>();
 
-    public final List<FailedServletContextDTO> failedServletContextDTO = new ArrayList<FailedServletContextDTO>();
+    public final List<FailedServletContextDTO> failedServletContextDTOs = new ArrayList<FailedServletContextDTO>();
+
+    public final List<FailedPreprocessorDTO> failedPreprocessorDTOs = new ArrayList<FailedPreprocessorDTO>();
 
     public void add(final AbstractInfo<?> info, final long contextId, final int failureCode)
     {
         if (info instanceof ServletContextHelperInfo)
         {
             final FailedServletContextDTO dto = (FailedServletContextDTO)ServletContextDTOBuilder.build((ServletContextHelperInfo)info, null, failureCode);
-            this.failedServletContextDTO.add(dto);
+            this.failedServletContextDTOs.add(dto);
         }
         else if (info instanceof ServletInfo )
         {
@@ -73,13 +77,18 @@ public final class FailedDTOHolder
                 this.failedErrorPageDTOs.add(dto);
             }
 
-            if ( ((ServletInfo) info).getPatterns() != null || !isError )
+            if ( ((ServletInfo) info).getPatterns() != null || ((ServletInfo)info).getName() != null || !isError )
             {
                 final FailedServletDTO dto = (FailedServletDTO)ServletDTOBuilder.build((ServletInfo) info, failureCode);
                 if ( ((ServletInfo) info).getPatterns() != null )
                 {
                     dto.patterns = ((ServletInfo) info).getPatterns();
+                } 
+                else 
+                {
+                	dto.patterns = BuilderConstants.EMPTY_STRING_ARRAY;
                 }
+                dto.name = ((ServletInfo)info).getName();
                 dto.servletContextId = contextId;
                 this.failedServletDTOs.add(dto);
             }
@@ -104,6 +113,11 @@ public final class FailedDTOHolder
             final FailedListenerDTO dto = (FailedListenerDTO)ListenerDTOBuilder.build((ListenerInfo)info, failureCode);
             dto.servletContextId = contextId;
             this.failedListenerDTOs.add(dto);
+        }
+        else if ( info instanceof PreprocessorInfo )
+        {
+            final FailedPreprocessorDTO dto = (FailedPreprocessorDTO)PreprocessorDTOBuilder.build((PreprocessorInfo) info, failureCode);
+            this.failedPreprocessorDTOs.add(dto);
         }
         else
         {

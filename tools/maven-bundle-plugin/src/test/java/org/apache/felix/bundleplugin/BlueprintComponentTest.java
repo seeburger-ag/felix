@@ -28,12 +28,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.jar.Manifest;
 
-import aQute.bnd.osgi.Analyzer;
-import aQute.bnd.osgi.Jar;
-import aQute.bnd.osgi.Verifier;
-import aQute.libg.generics.Create;
-import junit.framework.TestCase;
-
 import org.apache.felix.utils.manifest.Clause;
 import org.apache.felix.utils.manifest.Parser;
 import org.apache.maven.artifact.Artifact;
@@ -50,7 +44,11 @@ import org.apache.maven.shared.dependency.graph.DependencyGraphBuilder;
 import org.apache.maven.shared.dependency.graph.DependencyNode;
 import org.osgi.framework.Constants;
 
+import aQute.bnd.osgi.Analyzer;
 import aQute.bnd.osgi.Builder;
+import aQute.bnd.osgi.Jar;
+import aQute.bnd.osgi.Verifier;
+import aQute.libg.generics.Create;
 
 
 public class BlueprintComponentTest extends AbstractMojoTestCase
@@ -131,9 +129,17 @@ public class BlueprintComponentTest extends AbstractMojoTestCase
         Builder builder = plugin.buildOSGiBundle( project, dependencyGraph, instructions, props, plugin.getClasspath( project, dependencyGraph ) );
 
         Manifest manifest = builder.getJar().getManifest();
-        String expSvc = manifest.getMainAttributes().getValue( Constants.EXPORT_SERVICE );
         String impSvc = manifest.getMainAttributes().getValue( Constants.IMPORT_SERVICE );
-        assertNotNull( expSvc );
+        if ("service".equals(mode)) {
+            String expSvc = manifest.getMainAttributes().getValue( Constants.EXPORT_SERVICE );
+            assertNotNull( expSvc );
+            assertTrue( expSvc.contains("beanRef.Foo;osgi.service.blueprint.compname=myBean") );
+        } else {
+            String prvCap = manifest.getMainAttributes().getValue( Constants.PROVIDE_CAPABILITY );
+            assertNotNull( prvCap );
+            assertTrue( prvCap.contains("osgi.service;effective:=active;objectClass=\"beanRef.Foo\";osgi.service.blueprint.compname=myBean") );
+        }
+
         assertNotNull( impSvc );
 
         String impPkg = manifest.getMainAttributes().getValue( Constants.IMPORT_PACKAGE );
@@ -147,7 +153,9 @@ public class BlueprintComponentTest extends AbstractMojoTestCase
             assertTrue( pkgs.contains( "p" + i ) );
         }
 
-        new Verifier(builder).verify();
+        try (Verifier verifier = new Verifier(builder)) {
+            verifier.verify();
+        }
     }
 
     public void testAnalyzer() throws Exception
@@ -159,7 +167,10 @@ public class BlueprintComponentTest extends AbstractMojoTestCase
         jar.setManifest(manifest);
         analyzer.setJar(jar);
         analyzer.analyze();
-        new Verifier(analyzer).verify();
+
+        try (Verifier verifier = new Verifier(analyzer)) {
+            verifier.verify();
+        }
     }
 
 }

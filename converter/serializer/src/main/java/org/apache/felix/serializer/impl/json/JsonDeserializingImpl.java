@@ -18,34 +18,38 @@ package org.apache.felix.serializer.impl.json;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Type;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Scanner;
 
-import org.apache.felix.converter.impl.Util;
-import org.osgi.service.converter.ConversionException;
-import org.osgi.service.converter.Converter;
-import org.osgi.service.serializer.Deserializing;
+import org.apache.felix.serializer.Deserializing;
+import org.apache.felix.serializer.Parser;
+import org.apache.felix.serializer.impl.Util;
+import org.osgi.util.converter.ConversionException;
+import org.osgi.util.converter.Converter;
 
 public class JsonDeserializingImpl<T> implements Deserializing<T> {
-    private final Class<T> clazz;
-    private final Converter converter;
+    private final Type type;
+    private volatile Converter converter;
+    private volatile Parser parser;
 
-    public JsonDeserializingImpl(Converter c, Class<T> cls) {
+    public JsonDeserializingImpl(Converter c, Parser p, Type t) {
         converter = c;
-        clazz = cls;
+        parser = p;
+        type = t;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public T from(CharSequence in) {
-        JsonParser jp = new JsonParser(in);
-        Map<?,?> m = jp.getParsed();
-        if (m.getClass().isAssignableFrom(clazz))
-            return (T) m;
+        Map<?,?> m = parser.parse(in);
+        if (type instanceof Class)
+            if (m.getClass().isAssignableFrom((Class<?>) type))
+                return (T) m;
 
-        return converter.convert(m).to(clazz);
+        return (T) converter.convert(m).to(type);
     }
 
     @Override
@@ -70,5 +74,17 @@ public class JsonDeserializingImpl<T> implements Deserializing<T> {
             s.useDelimiter("\\Z");
             return from(s.next());
         }
+    }
+
+    @Override
+    public Deserializing<T> convertWith(Converter c) {
+        converter = c;
+        return this;
+    }
+
+    @Override
+    public Deserializing<T> parseWith(Parser p) {
+        parser = p;
+        return this;
     }
 }

@@ -42,6 +42,7 @@ import javax.management.NotificationListener;
 import javax.management.ObjectName;
 
 import org.osgi.framework.BundleContext;
+import org.osgi.framework.Constants;
 import org.osgi.framework.InvalidSyntaxException;
 import org.osgi.framework.ServiceEvent;
 import org.osgi.framework.ServiceListener;
@@ -91,7 +92,7 @@ final class MemoryUsageSupport implements NotificationListener, ServiceListener
         // register for the log service
         try
         {
-            context.addServiceListener(this, "(objectclass=org.osgi.service.log.LogService)");
+            context.addServiceListener(this, "(" + Constants.OBJECTCLASS + "=org.osgi.service.log.LogService)");
             logServiceReference = context.getServiceReference("org.osgi.service.log.LogService");
             if (logServiceReference != null)
             {
@@ -366,12 +367,34 @@ final class MemoryUsageSupport implements NotificationListener, ServiceListener
             buf.append(",'type':'").append(pool.getType()).append('\'');
 
             MemoryUsage usage = pool.getUsage();
-            usedTotal += formatNumber(buf, "used", usage.getUsed());
-            initTotal += formatNumber(buf, "init", usage.getInit());
-            committedTotal += formatNumber(buf, "committed", usage.getCommitted());
-            maxTotal += formatNumber(buf, "max", usage.getMax());
+            final long used = usage.getUsed();
+            formatNumber(buf, "used", used);
+            if ( used > -1 )
+            {
+                usedTotal += used;
+            }
+            final long init = usage.getInit();
+            formatNumber(buf, "init", init);
+            if ( init > - 1 )
+            {
+                initTotal +=  init;
+            }
+            final long committed = usage.getCommitted();
+            formatNumber(buf, "committed", committed);
+            committedTotal += committed;
+            final long max = usage.getMax();
+            formatNumber(buf, "max", usage.getMax());
 
-            final long score = 100L * usage.getUsed() / usage.getMax();
+            final long score;
+            if ( max == -1 || used == -1 )
+            {
+                score = 100;
+            }
+            else
+            {
+                maxTotal += max;
+                score = 100L * used / max;
+            }
             buf.append(",'score':'").append(score).append("%'");
 
             buf.append("},");
@@ -394,7 +417,7 @@ final class MemoryUsageSupport implements NotificationListener, ServiceListener
         return buf.toString();
     }
 
-    long formatNumber(final StringBuilder buf, final String title, final long value)
+    void formatNumber(final StringBuilder buf, final String title, final long value)
     {
 
         final BigDecimal KB = new BigDecimal(1000L);
@@ -418,13 +441,25 @@ final class MemoryUsageSupport implements NotificationListener, ServiceListener
             bd = bd.divide(KB);
             suffix = "kB";
         }
-        else
+        else if (value >= 0 )
         {
             suffix = "B";
         }
-        bd = bd.setScale(2, RoundingMode.UP);
-        buf.append(",'").append(title).append("':'").append(bd).append(suffix).append('\'');
-        return value;
+        else
+        {
+            suffix = null;
+        }
+        buf.append(",'").append(title).append("':'");
+        if ( suffix == null )
+        {
+            buf.append("unknown");
+        }
+        else
+        {
+            bd = bd.setScale(2, RoundingMode.UP);
+            buf.append(bd).append(suffix);
+        }
+        buf.append('\'');
     }
 
     final String getDefaultDumpLocation()
@@ -707,17 +742,29 @@ final class MemoryUsageSupport implements NotificationListener, ServiceListener
         final String message = String.format(format, args);
         if (logService != null)
         {
-            ((LogService) logService).log(level, message, t);
+            try {
+                Method m = logService.getClass()
+                        .getDeclaredMethod("log", int.class, String.class, Throwable.class);
+                m.setAccessible(true);
+                m.invoke(logService, level, message, t);
+            } catch (Exception e) {
+                logSTD(LogService.LOG_WARNING, e, "Unable to log with the given log service");
+                logSTD(level, t, message);
+            }
         }
         else
         {
-            PrintStream out = (level <= LogService.LOG_ERROR) ? System.err : System.out;
-            out.printf("%s: %s (%d): %s%n", toLevelString(level), context.getBundle().getSymbolicName(), context
-                .getBundle().getBundleId(), message);
-            if (t != null)
-            {
-                t.printStackTrace(out);
-            }
+            logSTD(level, t, message);
+        }
+    }
+
+    private void logSTD(int level, Throwable t, String message) {
+        PrintStream out = (level <= LogService.LOG_ERROR) ? System.err : System.out;
+        out.printf("%s: %s (%d): %s%n", toLevelString(level), context.getBundle().getSymbolicName(), context
+            .getBundle().getBundleId(), message);
+        if (t != null)
+        {
+            t.printStackTrace(out);
         }
     }
 

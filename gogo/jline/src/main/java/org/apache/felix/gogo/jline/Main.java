@@ -18,8 +18,11 @@
  */
 package org.apache.felix.gogo.jline;
 
+import java.io.FilterInputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 
 import org.apache.felix.gogo.jline.Shell.Context;
@@ -32,42 +35,37 @@ import org.jline.terminal.TerminalBuilder;
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        InputStream sin = System.in;
-        PrintStream sout = System.out;
-        PrintStream serr = System.err;
-
         try (Terminal terminal = TerminalBuilder.builder()
                 .name("gogo")
-                .type(System.getenv("TERM"))
                 .system(true)
-                .streams(sin, sout)
+                .nativeSignals(true)
+                .signalHandler(Terminal.SignalHandler.SIG_IGN)
                 .build()) {
             ThreadIOImpl tio = new ThreadIOImpl();
             tio.start();
             try {
                 CommandProcessorImpl processor = new CommandProcessorImpl(tio);
                 Context context = new MyContext();
-                Shell shell = new Shell(context, processor);
+                Shell shell = new Shell(context, processor, tio, null);
                 processor.addCommand("gogo", processor, "addCommand");
                 processor.addCommand("gogo", processor, "removeCommand");
                 processor.addCommand("gogo", processor, "eval");
+                processor.addConverter(new BaseConverters());
                 register(processor, new Builtin(), Builtin.functions);
                 register(processor, new Procedural(), Procedural.functions);
                 register(processor, new Posix(processor), Posix.functions);
                 register(processor, shell, Shell.functions);
-                /*
-                try {
-                    register(processor, new Telnet(processor), Telnet.functions);
-                } catch (Throwable t) {
-                    // ignore
-                }
-                try {
-                    register(processor, new Ssh(processor), Ssh.functions);
-                } catch (Throwable t) {
-                    // ignore
-                }
-                */
-                CommandSession session = processor.createSession(terminal.input(), terminal.output(), terminal.output());
+                InputStream in = new FilterInputStream(terminal.input()) {
+                    @Override
+                    public void close() {
+                    }
+                };
+                OutputStream out = new FilterOutputStream(terminal.output()) {
+                    @Override
+                    public void close() {
+                    }
+                };
+                CommandSession session = processor.createSession(in, out, out);
                 session.put(Shell.VAR_CONTEXT, context);
                 session.put(Shell.VAR_TERMINAL, terminal);
                 try {
@@ -104,7 +102,7 @@ public class Main {
             return System.getProperty(name);
         }
 
-        public void exit() throws Exception {
+        public void exit() {
             System.exit(0);
         }
     }

@@ -18,12 +18,7 @@
  */
 package org.apache.felix.gogo.runtime;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
 
 
@@ -187,7 +182,7 @@ public class Parser
     }
 
     public List<Statement> statements() {
-        Collections.sort(statements, (o1, o2) -> Integer.compare(o1.start, o2.start));
+        statements.sort(Comparator.comparingInt(o -> o.start));
         return Collections.unmodifiableList(statements);
     }
 
@@ -211,11 +206,15 @@ public class Parser
                     return new Program(whole(tokens, start), tokens);
                 }
             }
-            if (Token.eq("}", t) || Token.eq(")", t))
+            if (Token.eq("}", t) || Token.eq(")", t) || Token.eq("]", t))
             {
                 if (pipes != null)
                 {
                     throw new EOFError(t.line, t.column, "unexpected token '" + t + "' while looking for a statement after |", getMissing("pipe"), "0");
+                }
+                else if (stack.isEmpty())
+                {
+                    throw new SyntaxError(t.line, t.column, "unexpected token '" + t + "'");
                 }
                 else
                 {

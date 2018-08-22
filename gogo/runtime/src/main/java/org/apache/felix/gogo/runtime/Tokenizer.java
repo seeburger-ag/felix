@@ -107,11 +107,14 @@ public class Tokenizer extends BaseTokenizer
                 case '>':
                 case '<':
                     t = text.subSequence(start, index);
-                    tn = text.subSequence(start, index + 1);
-                    if (redir.matcher(tn).matches())
+                    if (!eot())
                     {
-                        getch();
-                        break;
+                        tn = text.subSequence(start, index + 1);
+                        if (redir.matcher(tn).matches())
+                        {
+                            getch();
+                            break;
+                        }
                     }
                     if (redir.matcher(t).matches() && start < index - 1)
                     {
@@ -236,7 +239,7 @@ public class Tokenizer extends BaseTokenizer
             getch();
         }
         if (ch == EOT) {
-            throw new EOFError(sLine, sCol, "expected here-doc start", "heredoc", "foo");
+            throw new EOFError(sLine, sCol, "expected here-doc start", "heredoc", "foo\n");
         }
         Token token = text.subSequence(start, index - 1);
         getch();
@@ -271,7 +274,7 @@ public class Tokenizer extends BaseTokenizer
             }
             if (ch == EOT)
             {
-                throw new EOFError(sLine, sCol, "unexpected eof found in here-doc", "heredoc", token.toString());
+                throw new EOFError(sLine, sCol, "unexpected eof found in here-doc", "heredoc", "\n" + token.toString() + "\n");
             }
             getch();
         }

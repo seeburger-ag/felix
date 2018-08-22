@@ -20,6 +20,7 @@ package org.apache.felix.gogo.jline;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.felix.gogo.runtime.CommandSessionImpl;
@@ -40,6 +41,8 @@ import org.jline.utils.WCWidth;
 
 public class Highlighter extends DefaultHighlighter {
 
+    public static final String DEFAULT_HIGHLIGHTER_COLORS = "rs=35:st=32:nu=32:co=32:va=36:vn=36:fu=94:bf=91:re=90";
+
     private final CommandSession session;
 
     public Highlighter(CommandSession session) {
@@ -51,7 +54,7 @@ public class Highlighter extends DefaultHighlighter {
             Program program = null;
             List<Token> tokens = null;
             List<Statement> statements = null;
-            String repaired = buffer + " ";
+            String repaired = buffer;
             while (program == null) {
                 try {
                     org.apache.felix.gogo.runtime.Parser parser = new org.apache.felix.gogo.runtime.Parser(repaired);
@@ -59,9 +62,15 @@ public class Highlighter extends DefaultHighlighter {
                     tokens = parser.tokens();
                     statements = parser.statements();
                 } catch (EOFError e) {
-                    repaired = repaired + e.repair();
+                    repaired = repaired + " " + e.repair();
+                    // Make sure we don't loop forever
+                    if (repaired.length() > buffer.length() + 1024) {
+                        return new AttributedStringBuilder().append(buffer).toAttributedString();
+                    }
                 }
             }
+
+            Map<String, String> colors = Posix.getColorMap(session, "HIGHLIGHTER", DEFAULT_HIGHLIGHTER_COLORS);
 
             int underlineStart = -1;
             int underlineEnd = -1;
@@ -160,42 +169,14 @@ public class Highlighter extends DefaultHighlighter {
             }
 
             AttributedStringBuilder sb = new AttributedStringBuilder();
-            Type prevType = Type.Unknown;
             for (int i = 0; i < repaired.length(); i++) {
-                if (i == underlineStart) {
+                sb.style(AttributedStyle.DEFAULT);
+                applyStyle(sb, colors, types[i]);
+                if (i >= underlineStart && i <= underlineEnd) {
                     sb.style(sb.style().underline());
                 }
-                if (i == negativeStart) {
+                if (i >= negativeStart && i <= negativeEnd) {
                     sb.style(sb.style().inverse());
-                }
-                if (types[i] != prevType) {
-                    prevType = types[i];
-                    switch (prevType) {
-                        case Reserved:
-                            sb.style(sb.style().foreground(AttributedStyle.MAGENTA));
-                            break;
-                        case String:
-                        case Number:
-                        case Constant:
-                            sb.style(sb.style().foreground(AttributedStyle.GREEN));
-                            break;
-                        case Variable:
-                        case VariableName:
-                            sb.style(sb.style().foreground(AttributedStyle.CYAN));
-                            break;
-                        case Function:
-                            sb.style(sb.style().foreground(AttributedStyle.BLUE + AttributedStyle.BRIGHT));
-                            break;
-                        case BadFunction:
-                            sb.style(sb.style().foreground(AttributedStyle.RED + AttributedStyle.BRIGHT));
-                            break;
-                        case Repair:
-                            sb.style(sb.style().foreground(AttributedStyle.BLACK + AttributedStyle.BRIGHT));
-                            break;
-                        default:
-                            sb.style(sb.style().foregroundDefault());
-                            break;
-                    }
                 }
                 char c = repaired.charAt(i);
                 if (c == '\t' || c == '\n') {
@@ -211,12 +192,6 @@ public class Highlighter extends DefaultHighlighter {
                         sb.append(c);
                     }
                 }
-                if (i == underlineEnd) {
-                    sb.style(sb.style().underlineOff());
-                }
-                if (i == negativeEnd) {
-                    sb.style(sb.style().inverseOff());
-                }
             }
 
             return sb.toAttributedString();
@@ -225,18 +200,27 @@ public class Highlighter extends DefaultHighlighter {
         }
     }
 
+    private void applyStyle(AttributedStringBuilder sb, Map<String, String> colors, Type type) {
+        Posix.applyStyle(sb, colors, type.color);
+    }
+
     enum Type {
-        Reserved,
-        String,
-        Number,
-        Variable,
-        VariableName,
-        Function,
-        BadFunction,
-        Value,
-        Constant,
-        Unknown,
-        Repair
+        Reserved("rs"),
+        String("st"),
+        Number("nu"),
+        Variable("va"),
+        VariableName("vn"),
+        Function("fu"),
+        BadFunction("bf"),
+        Constant("co"),
+        Unknown("un"),
+        Repair("re");
+
+        private final String color;
+
+        Type(String color) {
+            this.color = color;
+        }
     }
 
 }

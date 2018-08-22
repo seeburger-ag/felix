@@ -29,10 +29,11 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 
 import org.apache.felix.http.base.internal.handler.ServletHandler;
 import org.apache.felix.http.base.internal.runtime.ServletInfo;
+import org.apache.felix.http.base.internal.runtime.dto.BuilderConstants;
 import org.apache.felix.http.base.internal.runtime.dto.ResourceDTOBuilder;
 import org.apache.felix.http.base.internal.runtime.dto.ServletDTOBuilder;
 import org.osgi.service.http.runtime.dto.DTOConstants;
@@ -48,6 +49,8 @@ import org.osgi.service.http.runtime.dto.ServletDTO;
  */
 public final class ServletRegistry
 {
+    private static final String NAMED_SERVLET_PATTERN = ":::";
+
     private volatile List<PathResolver> activeResolvers = Collections.emptyList();
 
     private final Map<String, List<ServletHandler>> inactiveServletMappings = new HashMap<String, List<ServletHandler>>();
@@ -68,7 +71,7 @@ public final class ServletRegistry
      * @param relativeRequestURI The request uri
      * @return A path resolution if a servlet matched, {@code null} otherwise
      */
-    public PathResolution resolve(@Nonnull final String relativeRequestURI)
+    public PathResolution resolve(@NotNull final String relativeRequestURI)
     {
         final List<PathResolver> resolvers = this.activeResolvers;
         for(final PathResolver entry : resolvers)
@@ -101,10 +104,10 @@ public final class ServletRegistry
      *
      * @param handler The servlet handler
      */
-    public synchronized void addServlet(@Nonnull final ServletHandler handler)
+    public synchronized void addServlet(@NotNull final ServletHandler handler)
     {
         // we have to check for every pattern in the info
-        // Can be null in case of error-handling servlets...
+        // Can be null in case of error-handling servlets and named servlets
         if ( handler.getServletInfo().getPatterns() != null )
         {
             final Map<ServletInfo, RegistrationStatus> newMap = new TreeMap<ServletInfo, ServletRegistry.RegistrationStatus>(this.mapping);
@@ -173,6 +176,26 @@ public final class ServletRegistry
             this.activeResolvers = resolvers;
             this.mapping = newMap;
         }
+        else if ( !handler.getServletInfo().isResource() && handler.getServletInfo().getName() != null )
+        {
+            final Map<ServletInfo, RegistrationStatus> newMap = new TreeMap<ServletInfo, ServletRegistry.RegistrationStatus>(this.mapping);
+
+            final RegistrationStatus status = new RegistrationStatus();
+            status.handler = handler;
+
+            // if a servlet has only a name we always try to activate
+            // this is not very efficient, but works
+            // add to active
+            final int result = handler.init();
+            if ( result == -1 )
+            {
+                addToNameMapping(handler);
+            }
+            addPattern(status, result, NAMED_SERVLET_PATTERN);
+
+            newMap.put(handler.getServletInfo(), status);
+            this.mapping = newMap;
+        }
     }
 
     private void addToNameMapping(final ServletHandler handler)
@@ -230,7 +253,7 @@ public final class ServletRegistry
      * Remove a servlet
      * @param info The servlet info
      */
-    public synchronized void removeServlet(@Nonnull final ServletInfo info, final boolean destroy)
+    public synchronized void removeServlet(@NotNull final ServletInfo info, final boolean destroy)
     {
         if ( info.getPatterns() != null )
         {
@@ -324,6 +347,21 @@ public final class ServletRegistry
                 cleanupHandler.dispose();
             }
         }
+        else if ( !info.isResource() && info.getName() != null )
+        {
+            final Map<ServletInfo, RegistrationStatus> newMap = new TreeMap<ServletInfo, ServletRegistry.RegistrationStatus>(this.mapping);
+            final RegistrationStatus status = newMap.remove(info);
+
+            if ( status != null )
+            {
+                removeFromNameMapping(info.getName(), status.handler);
+
+                this.mapping = newMap;
+
+                status.handler.dispose();
+            }
+
+        }
     }
 
     public synchronized void cleanup()
@@ -406,7 +444,7 @@ public final class ServletRegistry
         }
     }
 
-    public ServletHandler resolveByName(final @Nonnull String name)
+    public ServletHandler resolveByName(final @NotNull String name)
     {
         final List<ServletHandler> handlerList = this.servletsByName.get(name);
         if ( handlerList != null )
@@ -435,7 +473,14 @@ public final class ServletRegistry
                 if ( entry.getKey().isResource() )
                 {
                     final ResourceDTO state = ResourceDTOBuilder.build(entry.getValue().handler, map.getKey());
-                    state.patterns = Arrays.copyOf(map.getValue(), map.getValue().length);
+                    if ( map.getValue().length == 1 && NAMED_SERVLET_PATTERN == map.getValue()[0] )
+                    {
+                        state.patterns = BuilderConstants.EMPTY_STRING_ARRAY;
+                    }
+                    else
+                    {
+                        state.patterns = Arrays.copyOf(map.getValue(), map.getValue().length);
+                    }
                     if ( map.getKey() == -1 )
                     {
                         resourceDTOs.put(serviceId, state);
@@ -448,7 +493,14 @@ public final class ServletRegistry
                 else
                 {
                     final ServletDTO state = ServletDTOBuilder.build(entry.getValue().handler, map.getKey());
-                    state.patterns = Arrays.copyOf(map.getValue(), map.getValue().length);
+                    if ( map.getValue().length == 1 && NAMED_SERVLET_PATTERN == map.getValue()[0] )
+                    {
+                        state.patterns = BuilderConstants.EMPTY_STRING_ARRAY;
+                    }
+                    else
+                    {
+                        state.patterns = Arrays.copyOf(map.getValue(), map.getValue().length);
+                    }
                     if ( map.getKey() == -1 )
                     {
                         servletDTOs.put(serviceId, state);

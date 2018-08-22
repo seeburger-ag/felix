@@ -18,14 +18,15 @@ package org.apache.felix.http.base.internal;
 
 import java.util.Hashtable;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
+import javax.servlet.Servlet;
 import javax.servlet.ServletContext;
-import javax.servlet.http.HttpSessionAttributeListener;
 import javax.servlet.http.HttpSessionEvent;
 import javax.servlet.http.HttpSessionIdListener;
 import javax.servlet.http.HttpSessionListener;
 
 import org.apache.felix.http.base.internal.dispatch.Dispatcher;
+import org.apache.felix.http.base.internal.dispatch.DispatcherServlet;
 import org.apache.felix.http.base.internal.handler.HttpSessionWrapper;
 import org.apache.felix.http.base.internal.registry.HandlerRegistry;
 import org.apache.felix.http.base.internal.service.HttpServiceFactory;
@@ -37,6 +38,7 @@ public final class HttpServiceController
     private final BundleContext bundleContext;
     private final HandlerRegistry registry;
     private final Dispatcher dispatcher;
+    private final EventDispatcher eventDispatcher;
     private final HttpServiceFactory httpServiceFactory;
     private final WhiteboardManager whiteboardManager;
 
@@ -47,13 +49,28 @@ public final class HttpServiceController
         this.bundleContext = bundleContext;
         this.registry = new HandlerRegistry();
         this.dispatcher = new Dispatcher(this.registry);
+        this.eventDispatcher = new EventDispatcher(this);
         this.httpServiceFactory = new HttpServiceFactory(this.bundleContext, this.registry);
         this.whiteboardManager = new WhiteboardManager(bundleContext, this.httpServiceFactory, this.registry);
     }
 
-    Dispatcher getDispatcher()
+    public void stop()
     {
-        return this.dispatcher;
+        this.unregister();
+    }
+
+    /**
+     * Create a new dispatcher servlet
+     * @return The dispatcher servlet.
+     */
+    public @NotNull Servlet createDispatcherServlet()
+    {
+        return new DispatcherServlet(this.dispatcher);
+    }
+
+    public EventDispatcher getEventDispatcher()
+    {
+        return this.eventDispatcher;
     }
 
     HttpSessionListener getSessionListener()
@@ -66,26 +83,16 @@ public final class HttpServiceController
 
                 @Override
                 public void sessionDestroyed(final HttpSessionEvent se) {
-                    httpServiceFactory.getSessionListener().sessionDestroyed(se);
-                    whiteboardManager.sessionDestroyed(se.getSession(), HttpSessionWrapper.getSessionContextIds(se.getSession()));
+                    whiteboardManager.sessionDestroyed(se.getSession(), HttpSessionWrapper.getSessionContextNames(se.getSession()));
                 }
 
                 @Override
                 public void sessionCreated(final HttpSessionEvent se) {
-                    httpServiceFactory.getSessionListener().sessionCreated(se);
+                    // nothing to do, session created event is sent from within the session
                 }
             };
         }
         return httpSessionListener;
-    }
-
-    /**
-     * TODO : we should try to remove this, it's only needed for
-     *        the proprietary support of the Felix implementation
-     */
-    HttpSessionAttributeListener getSessionAttributeListener()
-    {
-        return httpServiceFactory.getSessionAttributeListener();
     }
 
     HttpSessionIdListener getSessionIdListener()
@@ -93,28 +100,22 @@ public final class HttpServiceController
         return new HttpSessionIdListener() {
 
             @Override
-            public void sessionIdChanged(final HttpSessionEvent event, String oldSessionId) {
-                whiteboardManager.sessionIdChanged(event, oldSessionId, HttpSessionWrapper.getSessionContextIds(event.getSession()));
+            public void sessionIdChanged(final HttpSessionEvent event, final String oldSessionId) {
+                whiteboardManager.sessionIdChanged(event, oldSessionId, HttpSessionWrapper.getSessionContextNames(event.getSession()));
             }
         };
-    }
-
-    public void setProperties(final Hashtable<String, Object> props)
-    {
-        this.httpServiceFactory.setProperties(props);
-        this.whiteboardManager.setProperties(props);
     }
 
     /**
      * Start the http and http whiteboard service in the provided context.
      * @param containerContext The container context.
      */
-    public void register(@Nonnull final ServletContext containerContext)
+    public void register(@NotNull final ServletContext containerContext, @NotNull final Hashtable<String, Object> props)
     {
         this.registry.init();
 
-        this.httpServiceFactory.start(containerContext);
-        this.whiteboardManager.start(containerContext);
+        this.httpServiceFactory.start(containerContext, props);
+        this.whiteboardManager.start(containerContext, props);
 
         this.dispatcher.setWhiteboardManager(this.whiteboardManager);
     }

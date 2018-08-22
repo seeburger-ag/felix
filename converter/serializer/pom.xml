@@ -28,7 +28,7 @@
 
     <name>Apache Felix Serializer Services</name>
     <artifactId>org.apache.felix.serializer</artifactId>
-    <version>0.1-SNAPSHOT</version>
+    <version>0.3.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <scm>
@@ -66,9 +66,25 @@
                 <configuration>
                     <instructions>
                         <Bundle-Activator>org.apache.felix.serializer.impl.Activator</Bundle-Activator>
-                        <Private-Package>org.apache.felix.serializer.*,org.yaml.snakeyaml.*</Private-Package>
-                        <Export-Package>org.osgi.service.serializer</Export-Package>
+                        <Private-Package>
+                            org.apache.felix.serializer.*,
+                            org.yaml.snakeyaml.*,
+                            org.apache.felix.utils.*
+                        </Private-Package>
+                        <Export-Package>
+                            org.apache.felix.serializer;-split-package:=merge-first
+                        </Export-Package>
                         <Import-Package>*</Import-Package>
+                        <Provide-Capability>
+                            osgi.service;objectClass:List&lt;String&gt;="org.apache.felix.serializer.Serializer,
+                            	org.apache.felix.serializer.Serializer$JsonSerializer,
+                            	org.apache.felix.serializer.Serializer$YamlSerializer,
+                            	org.apache.felix.serializer.WriterFactory,
+                            	org.apache.felix.serializer.WriterFactory$JsonWriterFactory,
+                            	org.apache.felix.serializer.WriterFactory$YamlWriterFactory";
+                            uses:="org.apache.felix.serializer,org.osgi.util.converter,org.osgi.util.function"
+                        </Provide-Capability>
+                        <_sources>true</_sources>
                     </instructions>
                 </configuration>
             </plugin>
@@ -101,7 +117,14 @@
             <artifactId>snakeyaml</artifactId>
             <version>1.17</version>
         </dependency>
-        
+
+        <dependency>
+            <groupId>org.apache.felix</groupId>
+            <artifactId>org.apache.felix.utils</artifactId>
+            <version>1.10.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>

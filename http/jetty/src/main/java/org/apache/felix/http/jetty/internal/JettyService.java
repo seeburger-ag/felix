@@ -39,23 +39,23 @@ import javax.servlet.ServletContext;
 import javax.servlet.SessionCookieConfig;
 import javax.servlet.SessionTrackingMode;
 
-import org.apache.felix.http.base.internal.DispatcherServlet;
-import org.apache.felix.http.base.internal.EventDispatcher;
 import org.apache.felix.http.base.internal.HttpServiceController;
 import org.apache.felix.http.base.internal.logger.SystemLogger;
 import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.security.HashLoginService;
 import org.eclipse.jetty.server.Connector;
-import org.eclipse.jetty.server.ConnectorStatistics;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.SessionManager;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.server.handler.StatisticsHandler;
+import org.eclipse.jetty.server.handler.gzip.GzipHandler;
+import org.eclipse.jetty.server.session.HouseKeeper;
+import org.eclipse.jetty.server.session.SessionHandler;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.component.AbstractLifeCycle;
@@ -67,17 +67,17 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleEvent;
 import org.osgi.framework.Constants;
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.framework.ServiceFactory;
 import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
-import org.osgi.service.event.Event;
-import org.osgi.service.event.EventAdmin;
 import org.osgi.service.http.runtime.HttpServiceRuntimeConstants;
 import org.osgi.util.tracker.BundleTracker;
 import org.osgi.util.tracker.BundleTrackerCustomizer;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
-public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListener implements BundleTrackerCustomizer, ServiceTrackerCustomizer
+public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListener
 {
     /** PID for configuration of the HTTP service. */
     public static final String PID = "org.apache.felix.http";
@@ -91,34 +91,35 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
     private final JettyConfig config;
     private final BundleContext context;
-    private final DispatcherServlet dispatcher;
     private final HttpServiceController controller;
     private final Map<String, Deployment> deployments;
     private final ExecutorService executor;
 
-    private ServiceRegistration<?> configServiceReg;
-    private Server server;
-    private ContextHandlerCollection parent;
-    private EventDispatcher eventDispatcher;
-    private MBeanServerTracker mbeanServerTracker;
-    private BundleTracker bundleTracker;
-    private ServiceTracker eventAdmintTracker;
-    private ServiceTracker connectorTracker;
-    private ServiceTracker loadBalancerCustomizerTracker;
-    private CustomizerWrapper customizerWrapper;
-    private EventAdmin eventAdmin;
+    private volatile ServiceRegistration<?> configServiceReg;
+    private volatile Server server;
+    private volatile ContextHandlerCollection parent;
+    private volatile MBeanServerTracker mbeanServerTracker;
+    private volatile BundleTracker<Deployment> bundleTracker;
+    private volatile ServiceTracker<Object, Object> eventAdmintTracker;
+    private volatile ConnectorFactoryTracker connectorTracker;
+    private volatile RequestLogTracker requestLogTracker;
+    private volatile LogServiceRequestLog osgiRequestLog;
+    private volatile FileRequestLog fileRequestLog;
+    private volatile LoadBalancerCustomizerFactoryTracker loadBalancerCustomizerTracker;
+    private volatile CustomizerWrapper customizerWrapper;
+    private boolean registerManagedService = true;
+    private volatile Object eventAdmin;
+    private final String jettyVersion;
 
     public JettyService(final BundleContext context,
-            final DispatcherServlet dispatcher,
-            final EventDispatcher eventDispatcher,
             final HttpServiceController controller)
     {
+        this.jettyVersion = fixJettyVersion(context);
+
         this.context = context;
         this.config = new JettyConfig(this.context);
-        this.dispatcher = dispatcher;
-        this.eventDispatcher = eventDispatcher;
         this.controller = controller;
-        this.deployments = new LinkedHashMap<String, Deployment>();
+        this.deployments = new LinkedHashMap<>();
         this.executor = Executors.newSingleThreadExecutor(new ThreadFactory()
         {
             @Override
@@ -131,19 +132,118 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         });
     }
 
+    public JettyService(final BundleContext context,
+            final HttpServiceController controller,
+            final Dictionary<String,?> props)
+    {
+        this(context, controller);
+   	    this.config.update(props);
+   	    this.registerManagedService = false;
+    }
+
     public void start() throws Exception
     {
         // FELIX-4422: start Jetty synchronously...
         startJetty();
 
-        Dictionary<String, Object> props = new Hashtable<String, Object>();
-        props.put(Constants.SERVICE_PID, PID);
-        this.configServiceReg = this.context.registerService("org.osgi.service.cm.ManagedService", new JettyManagedService(this), props);
+        if (this.registerManagedService) {
+			final Dictionary<String, Object> props = new Hashtable<>();
+			props.put(Constants.SERVICE_PID, PID);
+	        props.put(Constants.SERVICE_VENDOR, "The Apache Software Foundation");
+	        props.put(Constants.SERVICE_DESCRIPTION, "Managed Service for the Jetty Http Service");
+			this.configServiceReg = this.context.registerService("org.osgi.service.cm.ManagedService",
+	                new ServiceFactory()
+	                {
 
-        this.eventAdmintTracker = new ServiceTracker(this.context, EventAdmin.class.getName(), this);
+	                    @Override
+	                    public Object getService(final Bundle bundle, final ServiceRegistration registration)
+	                    {
+	                        return new JettyManagedService(JettyService.this);
+	                    }
+
+	                    @Override
+	                    public void ungetService(Bundle bundle, ServiceRegistration registration, Object service)
+	                    {
+	                        // nothing to do
+	                    }
+	                }, props);
+        }
+
+        // we use the class name as a String to make the dependency on event admin optional
+        this.eventAdmintTracker = new ServiceTracker<>(this.context, "org.osgi.service.event.EventAdmin",
+                new ServiceTrackerCustomizer<Object, Object>()
+        {
+            @Override
+            public Object addingService(final ServiceReference<Object> reference)
+            {
+                final Object service = context.getService(reference);
+                eventAdmin = service;
+                return service;
+            }
+
+            @Override
+            public void modifiedService(final ServiceReference<Object> reference, final Object service)
+            {
+                // nothing to do
+            }
+
+            @Override
+            public void removedService(final ServiceReference<Object> reference, final Object service)
+            {
+                eventAdmin = null;
+                context.ungetService(reference);
+            }
+        });
         this.eventAdmintTracker.open();
 
-        this.bundleTracker = new BundleTracker(this.context, Bundle.ACTIVE | Bundle.STARTING, this);
+        this.bundleTracker = new BundleTracker<>(this.context, Bundle.ACTIVE | Bundle.STARTING,
+                new BundleTrackerCustomizer<Deployment>() {
+
+            @Override
+            public Deployment addingBundle(Bundle bundle, BundleEvent event)
+            {
+                return detectWebAppBundle(bundle);
+            }
+
+            @Override
+            public void modifiedBundle(Bundle bundle, BundleEvent event, Deployment object)
+            {
+                detectWebAppBundle(bundle);
+            }
+
+            private Deployment detectWebAppBundle(Bundle bundle)
+            {
+                if (bundle.getState() == Bundle.ACTIVE || (bundle.getState() == Bundle.STARTING && "Lazy".equals(bundle.getHeaders().get(HEADER_ACTIVATION_POLICY))))
+                {
+
+                    String contextPath = bundle.getHeaders().get(HEADER_WEB_CONTEXT_PATH);
+                    if (contextPath != null)
+                    {
+                        return startWebAppBundle(bundle, contextPath);
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            public void removedBundle(Bundle bundle, BundleEvent event, Deployment object)
+            {
+                String contextPath = bundle.getHeaders().get(HEADER_WEB_CONTEXT_PATH);
+                if (contextPath == null)
+                {
+                    return;
+                }
+
+                Deployment deployment = deployments.remove(contextPath);
+                if (deployment != null && deployment.getContext() != null)
+                {
+                    // remove registration, since bundle is already stopping
+                    deployment.setRegistration(null);
+                    undeploy(deployment, deployment.getContext());
+                }
+            }
+
+                });
         this.bundleTracker.open();
     }
 
@@ -176,18 +276,18 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         }
     }
 
-    private void publishServiceProperties()
+    private Hashtable<String, Object> getServiceProperties()
     {
-        Hashtable<String, Object> props = new Hashtable<String, Object>();
+        Hashtable<String, Object> props = new Hashtable<>();
         // Add some important configuration properties...
         this.config.setServiceProperties(props);
         addEndpointProperties(props, null);
 
         // propagate the new service properties to the actual HTTP service...
-        this.controller.setProperties(props);
+        return props;
     }
 
-    public void updated(Dictionary props)
+    public void updated(final Dictionary<String, ?> props)
     {
         if (this.config.update(props))
         {
@@ -213,19 +313,37 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
     {
         if (this.server != null)
         {
-            this.eventDispatcher.setActive(false);
+            this.controller.getEventDispatcher().setActive(false);
+            this.controller.unregister();
+
+            if (this.fileRequestLog != null)
+            {
+                this.fileRequestLog.stop();
+                this.fileRequestLog = null;
+            }
+            if (this.osgiRequestLog != null)
+            {
+                this.osgiRequestLog.unregister();
+                this.osgiRequestLog = null;
+            }
+            if (this.requestLogTracker != null)
+            {
+                this.requestLogTracker.close();
+                this.requestLogTracker = null;
+            }
+
             if (this.connectorTracker != null)
             {
                 this.connectorTracker.close();
                 this.connectorTracker = null;
             }
-            
+
             if (this.loadBalancerCustomizerTracker != null)
             {
                 this.loadBalancerCustomizerTracker.close();
                 this.loadBalancerCustomizerTracker = null;
-            } 
-            
+            }
+
             try
             {
                 this.server.stop();
@@ -249,7 +367,6 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
     {
         if (this.config.isUseHttp() || this.config.isUseHttps())
         {
-            final String version = fixJettyVersion();
 
             final int threadPoolMax = this.config.getThreadPoolMax();
             if (threadPoolMax >= 0) {
@@ -263,13 +380,16 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
             this.parent = new ContextHandlerCollection();
 
-            ServletContextHandler context = new ServletContextHandler(this.parent, this.config.getContextPath(), ServletContextHandler.SESSIONS);
+            ServletContextHandler context = new ServletContextHandler(this.parent,
+                    this.config.getContextPath(),
+                    ServletContextHandler.SESSIONS);
 
             configureSessionManager(context);
-            this.eventDispatcher.setActive(true);
-            context.addEventListener(eventDispatcher);
-            context.getSessionHandler().addEventListener(eventDispatcher);
-            final ServletHolder holder = new ServletHolder(this.dispatcher);
+            this.controller.getEventDispatcher().setActive(true);
+            context.addEventListener(controller.getEventDispatcher());
+            context.getSessionHandler().addEventListener(controller.getEventDispatcher());
+
+            final ServletHolder holder = new ServletHolder(this.controller.createDispatcherServlet());
             holder.setAsyncSupported(true);
             context.addServlet(holder, "/*");
             context.setMaxFormContentSize(this.config.getMaxFormSize());
@@ -282,16 +402,40 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
             }
 
             this.server.setHandler(this.parent);
+
+            if (this.config.isGzipHandlerEnabled()) 
+            {
+            	GzipHandler gzipHandler = new GzipHandler();
+            	gzipHandler.setMinGzipSize(this.config.getGzipMinGzipSize());
+            	gzipHandler.setCompressionLevel(this.config.getGzipCompressionLevel());
+            	gzipHandler.setInflateBufferSize(this.config.getGzipInflateBufferSize());
+            	gzipHandler.setSyncFlush(this.config.isGzipSyncFlush());
+            	gzipHandler.addExcludedAgentPatterns(this.config.getGzipExcludedUserAgent());
+            	gzipHandler.addIncludedMethods(this.config.getGzipIncludedMethods());
+            	gzipHandler.addExcludedMethods(this.config.getGzipExcludedMethods());
+            	gzipHandler.addIncludedPaths(this.config.getGzipIncludedPaths());
+            	gzipHandler.addExcludedPaths(this.config.getGzipExcludedPaths());
+            	gzipHandler.addIncludedMimeTypes(this.config.getGzipIncludedMimeTypes());
+            	gzipHandler.addExcludedMimeTypes(this.config.getGzipExcludedMimeTypes());
+                            	
+            	this.server.insertHandler(gzipHandler);
+            }
+            
             this.server.start();
 
-            if (this.config.isProxyLoadBalancerConnection()) 
+            // session id manager is only available after server is started
+            context.getSessionHandler().getSessionIdManager().getSessionHouseKeeper().setIntervalSec(
+                    this.config.getLongProperty(JettyConfig.FELIX_JETTY_SESSION_SCAVENGING_INTERVAL,
+                            HouseKeeper.DEFAULT_PERIOD_MS / 1000L));
+
+            if (this.config.isProxyLoadBalancerConnection())
             {
                 customizerWrapper = new CustomizerWrapper();
                 this.loadBalancerCustomizerTracker = new LoadBalancerCustomizerFactoryTracker(this.context, customizerWrapper);
                 this.loadBalancerCustomizerTracker.open();
             }
-            
-            final StringBuilder message = new StringBuilder("Started Jetty ").append(version).append(" at port(s)");
+
+            final StringBuilder message = new StringBuilder("Started Jetty ").append(this.jettyVersion).append(" at port(s)");
             if (this.config.isUseHttp() && initializeHttp())
             {
                 message.append(" HTTP:").append(this.config.getHttpPort());
@@ -304,7 +448,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
             this.connectorTracker = new ConnectorFactoryTracker(this.context, this.server);
             this.connectorTracker.open();
-            
+
             if (this.server.getConnectors() != null && this.server.getConnectors().length > 0)
             {
                 message.append(" on context path ").append(this.config.getContextPath());
@@ -318,6 +462,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
                 }
                 Connector connector = this.server.getConnectors()[0];
                 if (connector instanceof ServerConnector) {
+                    @SuppressWarnings("resource")
                     ServerConnector serverConnector = (ServerConnector) connector;
                     message.append("acceptors=").append(serverConnector.getAcceptors()).append(",");
                     message.append("selectors=").append(serverConnector.getSelectorManager().getSelectorCount());
@@ -325,12 +470,32 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
                 message.append("]");
 
                 SystemLogger.info(message.toString());
-                publishServiceProperties();
+                this.controller.register(context.getServletContext(), getServiceProperties());
             }
             else
             {
                 this.stopJetty();
                 SystemLogger.error("Jetty stopped (no connectors available)", null);
+            }
+
+            try {
+                this.requestLogTracker = new RequestLogTracker(this.context, this.config.getRequestLogFilter());
+                this.requestLogTracker.open();
+                this.server.setRequestLog(requestLogTracker);
+            } catch (InvalidSyntaxException e) {
+                SystemLogger.error("Invalid filter syntax in request log tracker", e);
+            }
+
+            if (this.config.isRequestLogOSGiEnabled()) {
+                this.osgiRequestLog = new LogServiceRequestLog(this.config);
+                this.osgiRequestLog.register(this.context);
+                SystemLogger.info("Directing Jetty request logs to the OSGi Log Service");
+            }
+
+            if (this.config.getRequestLogFilePath() != null && !this.config.getRequestLogFilePath().isEmpty()) {
+                this.fileRequestLog = new FileRequestLog(config);
+                this.fileRequestLog.start(this.context);
+                SystemLogger.info("Directing Jetty request logs to " + this.config.getRequestLogFilePath());
             }
         }
         else
@@ -339,11 +504,11 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         }
     }
 
-    private String fixJettyVersion()
+    private static String fixJettyVersion(final BundleContext ctx)
     {
         // FELIX-4311: report the real version of Jetty...
-        Dictionary headers = this.context.getBundle().getHeaders();
-        String version = (String) headers.get("X-Jetty-Version");
+        final Dictionary<String, String> headers = ctx.getBundle().getHeaders();
+        String version = headers.get("X-Jetty-Version");
         if (version != null)
         {
             System.setProperty("jetty.version", version);
@@ -369,7 +534,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
         configureConnector(connector, this.config.getHttpPort());
 
-        if (this.config.isProxyLoadBalancerConnection()) 
+        if (this.config.isProxyLoadBalancerConnection())
         {
             connFactory.getHttpConfiguration().addCustomizer(customizerWrapper);
         }
@@ -395,11 +560,11 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         HttpConfiguration httpConfiguration = connFactory.getHttpConfiguration();
         httpConfiguration.addCustomizer(new SecureRequestCustomizer());
 
-        if (this.config.isProxyLoadBalancerConnection()) 
+        if (this.config.isProxyLoadBalancerConnection())
         {
             httpConfiguration.addCustomizer(customizerWrapper);
         }
-        
+
         configureConnector(connector, this.config.getHttpsPort());
         return startConnector(connector);
     }
@@ -481,7 +646,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
         if (this.config.isRegisterMBeans())
         {
-            connector.addBean(new ConnectorStatistics());
+            connector.addBean(new ConnectionStatistics());
         }
     }
 
@@ -498,25 +663,19 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         config.setSendXPoweredBy(this.config.isSendServerHeader());
 
         connFactory.setInputBufferSize(this.config.getRequestBufferSize());
-
-        //Changed from 8.x to 9.x
-        //maxIdleTime -> ServerConnector.setIdleTimeout
-        //requestBufferSize -> HttpConnectionFactory.setInputBufferSize
-        //statsOn -> ServerConnector.addBean(new ConnectorStatistics());
     }
 
-    private void configureSessionManager(final ServletContextHandler context)
+    private void configureSessionManager(final ServletContextHandler context) throws Exception
     {
-        final SessionManager manager = context.getSessionHandler().getSessionManager();
+        final SessionHandler sessionHandler = context.getSessionHandler();
+        sessionHandler.setMaxInactiveInterval(this.config.getSessionTimeout() * 60);
+        sessionHandler.setSessionIdPathParameterName(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_ID_PATH_PARAMETER_NAME, SessionHandler.__DefaultSessionIdPathParameterName));
+        sessionHandler.setCheckingRemoteSessionIdEncoding(this.config.getBooleanProperty(JettyConfig.FELIX_JETTY_SERVLET_CHECK_REMOTE_SESSION_ENCODING, true));
+        sessionHandler.setSessionTrackingModes(Collections.singleton(SessionTrackingMode.COOKIE));
 
-        manager.setMaxInactiveInterval(this.config.getSessionTimeout() * 60);
-        manager.setSessionIdPathParameterName(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_ID_PATH_PARAMETER_NAME, SessionManager.__DefaultSessionIdPathParameterName));
-        manager.setCheckingRemoteSessionIdEncoding(this.config.getBooleanProperty(JettyConfig.FELIX_JETTY_SERVLET_CHECK_REMOTE_SESSION_ENCODING, true));
-        manager.setSessionTrackingModes(Collections.singleton(SessionTrackingMode.COOKIE));
-
-        SessionCookieConfig cookieConfig = manager.getSessionCookieConfig();
-        cookieConfig.setName(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_COOKIE_NAME, SessionManager.__DefaultSessionCookie));
-        cookieConfig.setDomain(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_DOMAIN, SessionManager.__DefaultSessionDomain));
+        final SessionCookieConfig cookieConfig = sessionHandler.getSessionCookieConfig();
+        cookieConfig.setName(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_COOKIE_NAME, SessionHandler.__DefaultSessionCookie));
+        cookieConfig.setDomain(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_DOMAIN, SessionHandler.__DefaultSessionDomain));
         cookieConfig.setPath(this.config.getProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_PATH, context.getContextPath()));
         cookieConfig.setMaxAge(this.config.getIntProperty(JettyConfig.FELIX_JETTY_SERVLET_SESSION_MAX_AGE, -1));
         cookieConfig.setHttpOnly(this.config.getBooleanProperty(JettyConfig.FELIX_JETTY_SESSION_COOKIE_HTTP_ONLY, true));
@@ -599,7 +758,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
     private List<String> getEndpoints(final Connector connector, final List<NetworkInterface> interfaces)
     {
-        final List<String> endpoints = new ArrayList<String>();
+        final List<String> endpoints = new ArrayList<>();
         for (final NetworkInterface ni : interfaces)
         {
             final Enumeration<InetAddress> ias = ni.getInetAddresses();
@@ -618,7 +777,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
     private void addEndpointProperties(final Hashtable<String, Object> props, Object container)
     {
-        final List<String> endpoints = new ArrayList<String>();
+        final List<String> endpoints = new ArrayList<>();
 
         final Connector[] connectors = this.server.getConnectors();
         if (connectors != null)
@@ -631,8 +790,8 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
                 {
                     try
                     {
-                        final List<NetworkInterface> interfaces = new ArrayList<NetworkInterface>();
-                        final List<NetworkInterface> loopBackInterfaces = new ArrayList<NetworkInterface>();
+                        final List<NetworkInterface> interfaces = new ArrayList<>();
+                        final List<NetworkInterface> loopBackInterfaces = new ArrayList<>();
                         final Enumeration<NetworkInterface> nis = NetworkInterface.getNetworkInterfaces();
                         while (nis.hasMoreElements())
                         {
@@ -678,14 +837,14 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
     private Deployment startWebAppBundle(Bundle bundle, String contextPath)
     {
-        postEvent(WebEvent.DEPLOYING(bundle, this.context.getBundle()));
+        postEvent(WebEvent.TOPIC_DEPLOYING, bundle, this.context.getBundle(), null, null, null);
 
         // check existing deployments
         Deployment deployment = this.deployments.get(contextPath);
         if (deployment != null)
         {
             SystemLogger.warning(String.format("Web application bundle %s has context path %s which is already registered", bundle.getSymbolicName(), contextPath), null);
-            postEvent(WebEvent.FAILED(bundle, this.context.getBundle(), null, contextPath, deployment.getBundle().getBundleId()));
+            postEvent(WebEvent.TOPIC_FAILED, bundle, this.context.getBundle(), null, contextPath, deployment.getBundle().getBundleId());
             return null;
         }
 
@@ -693,7 +852,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         if (contextPath.equals("/"))
         {
             SystemLogger.warning(String.format("Web application bundle %s has context path %s which is reserved", bundle.getSymbolicName(), contextPath), null);
-            postEvent(WebEvent.FAILED(bundle, this.context.getBundle(), null, contextPath, this.context.getBundle().getBundleId()));
+            postEvent(WebEvent.TOPIC_FAILED, bundle, this.context.getBundle(), null, contextPath, this.context.getBundle().getBundleId());
             return null;
         }
 
@@ -703,7 +862,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
             if (contextPath.startsWith(path))
             {
                 SystemLogger.warning(String.format("Web application bundle %s has context path %s which clashes with excluded path prefix %s", bundle.getSymbolicName(), contextPath, path), null);
-                postEvent(WebEvent.FAILED(bundle, this.context.getBundle(), null, path, null));
+                postEvent(WebEvent.TOPIC_FAILED, bundle, this.context.getBundle(), null, path, null);
                 return null;
             }
         }
@@ -739,18 +898,18 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
                     JettyService.this.parent.addHandler(context);
                     context.start();
 
-                    Dictionary<String, Object> props = new Hashtable<String, Object>();
+                    Dictionary<String, Object> props = new Hashtable<>();
                     props.put(WEB_SYMBOLIC_NAME, webAppBundle.getSymbolicName());
                     props.put(WEB_VERSION, webAppBundle.getVersion());
                     props.put(WEB_CONTEXT_PATH, deployment.getContextPath());
-                    deployment.setRegistration(webAppBundle.getBundleContext().registerService(ServletContext.class.getName(), context.getServletContext(), props));
+                    deployment.setRegistration(webAppBundle.getBundleContext().registerService(ServletContext.class, context.getServletContext(), props));
 
-                    postEvent(WebEvent.DEPLOYED(webAppBundle, extenderBundle));
+                    postEvent(WebEvent.TOPIC_DEPLOYED, webAppBundle, extenderBundle, null, null, null);
                 }
                 catch (Exception e)
                 {
                     SystemLogger.error(String.format("Deploying web application bundle %s failed.", webAppBundle.getSymbolicName()), e);
-                    postEvent(WebEvent.FAILED(webAppBundle, extenderBundle, e, null, null));
+                    postEvent(WebEvent.TOPIC_FAILED, webAppBundle, extenderBundle, e, null, null);
                     deployment.setContext(null);
                 }
             }
@@ -776,11 +935,11 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
 
                 try
                 {
-                    postEvent(WebEvent.UNDEPLOYING(webAppBundle, extenderBundle));
+                    postEvent(WebEvent.TOPIC_UNDEPLOYING, webAppBundle, extenderBundle, null, null, null);
 
                     context.getServletContext().removeAttribute(OSGI_BUNDLE_CONTEXT);
 
-                    ServiceRegistration registration = deployment.getRegistration();
+                    ServiceRegistration<ServletContext> registration = deployment.getRegistration();
                     if (registration != null)
                     {
                         registration.unregister();
@@ -795,82 +954,23 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
                 }
                 finally
                 {
-                    postEvent(WebEvent.UNDEPLOYED(webAppBundle, extenderBundle));
+                    postEvent(WebEvent.TOPIC_UNDEPLOYED, webAppBundle, extenderBundle, null, null, null);
                 }
             }
         });
     }
 
-    @Override
-    public Object addingBundle(Bundle bundle, BundleEvent event)
+    private void postEvent(final String topic,
+            final Bundle webAppBundle,
+            final Bundle extenderBundle,
+            final Throwable exception,
+            final String collision,
+            final Long collisionBundles)
     {
-        return detectWebAppBundle(bundle);
-    }
-
-    @Override
-    public void modifiedBundle(Bundle bundle, BundleEvent event, Object object)
-    {
-        detectWebAppBundle(bundle);
-    }
-
-    private Object detectWebAppBundle(Bundle bundle)
-    {
-        if (bundle.getState() == Bundle.ACTIVE || (bundle.getState() == Bundle.STARTING && "Lazy".equals(bundle.getHeaders().get(HEADER_ACTIVATION_POLICY))))
+        final Object ea = this.eventAdmin;
+        if (ea != null)
         {
-
-            String contextPath = bundle.getHeaders().get(HEADER_WEB_CONTEXT_PATH);
-            if (contextPath != null)
-            {
-                return startWebAppBundle(bundle, contextPath);
-            }
-        }
-        return null;
-    }
-
-    @Override
-    public void removedBundle(Bundle bundle, BundleEvent event, Object object)
-    {
-        String contextPath = bundle.getHeaders().get(HEADER_WEB_CONTEXT_PATH);
-        if (contextPath == null)
-        {
-            return;
-        }
-
-        Deployment deployment = this.deployments.remove(contextPath);
-        if (deployment != null && deployment.getContext() != null)
-        {
-            // remove registration, since bundle is already stopping
-            deployment.setRegistration(null);
-            undeploy(deployment, deployment.getContext());
-        }
-    }
-
-    @Override
-    public Object addingService(ServiceReference reference)
-    {
-        Object service = this.context.getService(reference);
-        modifiedService(reference, service);
-        return service;
-    }
-
-    @Override
-    public void modifiedService(ServiceReference reference, Object service)
-    {
-        this.eventAdmin = (EventAdmin) service;
-    }
-
-    @Override
-    public void removedService(ServiceReference reference, Object service)
-    {
-        this.context.ungetService(reference);
-        this.eventAdmin = null;
-    }
-
-    private void postEvent(Event event)
-    {
-        if (this.eventAdmin != null)
-        {
-            this.eventAdmin.postEvent(event);
+            WebEvent.postEvent(ea, topic, webAppBundle, extenderBundle, exception, collision, collisionBundles);
         }
     }
 
@@ -881,7 +981,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         {
             if (deployment.getContext() == null)
             {
-                postEvent(WebEvent.DEPLOYING(deployment.getBundle(), this.context.getBundle()));
+                postEvent(WebEvent.TOPIC_DEPLOYING, deployment.getBundle(), this.context.getBundle(), null, null, null);
                 WebAppBundleContext context = new WebAppBundleContext(deployment.getContextPath(), deployment.getBundle(), this.getClass().getClassLoader());
                 deploy(deployment, context);
             }
@@ -908,7 +1008,7 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
         private String contextPath;
         private Bundle bundle;
         private WebAppBundleContext context;
-        private ServiceRegistration registration;
+        private ServiceRegistration<ServletContext> registration;
 
         public Deployment(String contextPath, Bundle bundle)
         {
@@ -936,12 +1036,12 @@ public final class JettyService extends AbstractLifeCycle.AbstractLifeCycleListe
             this.context = context;
         }
 
-        public ServiceRegistration getRegistration()
+        public ServiceRegistration<ServletContext> getRegistration()
         {
             return this.registration;
         }
 
-        public void setRegistration(ServiceRegistration registration)
+        public void setRegistration(ServiceRegistration<ServletContext> registration)
         {
             this.registration = registration;
         }

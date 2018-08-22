@@ -22,6 +22,7 @@ import org.apache.felix.scr.impl.manager.ComponentActivator;
 import org.apache.felix.scr.impl.manager.RegionConfigurationSupport;
 import org.osgi.framework.ServiceReference;
 import org.osgi.service.cm.ConfigurationAdmin;
+import org.osgi.service.log.LogService;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
@@ -34,23 +35,47 @@ public class ConfigAdminTracker
     public ConfigAdminTracker(final ComponentActivator componentActivator)
     {
 
-        //TODO this assumes that there is 0 or 1 ca service visible to the bundle being extended.
-        //Is this sure to be true?
-        configAdminTracker = new ServiceTracker<ConfigurationAdmin, RegionConfigurationSupport>(
+        configAdminTracker = new ServiceTracker<>(
             componentActivator.getBundleContext(), CONFIGURATION_ADMIN,
             new ServiceTrackerCustomizer<ConfigurationAdmin, RegionConfigurationSupport>()
             {
 
+                @Override
                 public RegionConfigurationSupport addingService(ServiceReference<ConfigurationAdmin> reference)
                 {
+                    // let's do a quick check if the returned CA service is using the same
+                    // CA API as is visible to this (SCR) bundle
+                    boolean visible = false;
+                    try
+                    {
+                        ConfigurationAdmin ca = componentActivator.getBundleContext().getService(reference);
+                        if ( ca != null )
+                        {
+                            visible = true;
+                            componentActivator.getBundleContext().ungetService(reference);
+                        }
+                    }
+                    catch ( final Exception ex)
+                    {
+                        componentActivator.getLogger().log(LogService.LOG_ERROR,
+                                "Configuration admin API visible to bundle " + componentActivator.getBundleContext().getBundle() +
+                                " is not the same as the Configuration Admin API visible to the SCR implementation.", ex);
+                    }
+
+                    if ( !visible )
+                    {
+                        return null;
+                    }
                     return componentActivator.setRegionConfigurationSupport( reference );
                 }
 
+                @Override
                 public void modifiedService(ServiceReference<ConfigurationAdmin> reference,
                     RegionConfigurationSupport service)
                 {
                 }
 
+                @Override
                 public void removedService(ServiceReference<ConfigurationAdmin> reference,
                     RegionConfigurationSupport rcs)
                 {

@@ -18,38 +18,6 @@
  */
 package org.apache.felix.framework;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.net.URLStreamHandler;
-import java.security.AccessControlException;
-import java.security.Permission;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Dictionary;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.SortedSet;
-import java.util.StringTokenizer;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.WeakHashMap;
-
 import org.apache.felix.framework.BundleWiringImpl.BundleClassLoader;
 import org.apache.felix.framework.ServiceRegistry.ServiceRegistryCallbacks;
 import org.apache.felix.framework.cache.BundleArchive;
@@ -57,7 +25,6 @@ import org.apache.felix.framework.cache.BundleCache;
 import org.apache.felix.framework.capabilityset.CapabilitySet;
 import org.apache.felix.framework.capabilityset.SimpleFilter;
 import org.apache.felix.framework.ext.SecurityProvider;
-import org.apache.felix.framework.util.EventDispatcher;
 import org.apache.felix.framework.util.FelixConstants;
 import org.apache.felix.framework.util.ListenerInfo;
 import org.apache.felix.framework.util.MapToDictionary;
@@ -90,6 +57,7 @@ import org.osgi.framework.ServiceListener;
 import org.osgi.framework.ServicePermission;
 import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
+import org.osgi.framework.Version;
 import org.osgi.framework.launch.Framework;
 import org.osgi.framework.namespace.HostNamespace;
 import org.osgi.framework.startlevel.FrameworkStartLevel;
@@ -102,6 +70,42 @@ import org.osgi.framework.wiring.FrameworkWiring;
 import org.osgi.resource.Requirement;
 import org.osgi.service.packageadmin.ExportedPackage;
 import org.osgi.service.resolver.ResolutionException;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLStreamHandler;
+import java.security.AccessControlException;
+import java.security.Permission;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Dictionary;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.WeakHashMap;
 
 public class Felix extends BundleImpl implements Framework
 {
@@ -354,6 +358,12 @@ public class Felix extends BundleImpl implements Framework
                 m_configMutableMap.put(entry.getKey().toString(), entry.getValue());
             }
         }
+
+
+        // Get any system bundle activators.
+        m_activatorList = (List) m_configMutableMap.remove(FelixConstants.SYSTEMBUNDLE_ACTIVATORS_PROP);
+        m_activatorList = (m_activatorList == null) ? new ArrayList() : new ArrayList(m_activatorList);
+
         m_configMap = createUnmodifiableMap(m_configMutableMap);
 
         // Create logger with appropriate log level. Even though the
@@ -410,7 +420,7 @@ public class Felix extends BundleImpl implements Framework
         m_securityDefaultPolicy = "true".equals(getProperty(FelixConstants.SECURITY_DEFAULT_POLICY));
 
         // Create default bundle stream handler.
-        m_bundleStreamHandler = new URLHandlersBundleStreamHandler(this);
+        m_bundleStreamHandler = new URLHandlersBundleStreamHandler(this, m_secureAction);
 
         // Create service registry.
         m_registry = new ServiceRegistry(m_logger, new ServiceRegistryCallbacks() {
@@ -427,6 +437,7 @@ public class Felix extends BundleImpl implements Framework
         // Create the extension manager, which we will use as the
         // revision for the system bundle.
         m_extensionManager = new ExtensionManager(m_logger, m_configMap, this);
+
         try
         {
             addRevision(m_extensionManager.getRevision());
@@ -435,7 +446,7 @@ public class Felix extends BundleImpl implements Framework
         {
             // This should not throw an exception, but if so, lets convert it to
             // a runtime exception.
-            throw new RuntimeException(ex.getMessage());
+            throw new RuntimeException("Exception creating system bundle revision", ex);
         }
 
         // Create event dispatcher.
@@ -452,7 +463,7 @@ public class Felix extends BundleImpl implements Framework
         return m_logger;
     }
 
-    Map getConfig()
+    Map<String, Object> getConfig()
     {
         return m_configMap;
     }
@@ -672,11 +683,7 @@ public class Felix extends BundleImpl implements Framework
                 // Spec says we get a new UUID for each invocation of init().
                 m_configMutableMap.put(
                     FelixConstants.FRAMEWORK_UUID,
-                    Util.randomUUID());
-
-                // Get any system bundle activators.
-                m_activatorList = (List) m_configMutableMap.get(FelixConstants.SYSTEMBUNDLE_ACTIVATORS_PROP);
-                m_activatorList = (m_activatorList == null) ? new ArrayList() : new ArrayList(m_activatorList);
+                    Util.randomUUID("true".equalsIgnoreCase(_getProperty(FelixConstants.FRAMEWORK_UUID_SECURE))));
 
                 // Initialize event dispatcher.
                 m_dispatcher.startDispatching();
@@ -729,6 +736,25 @@ public class Felix extends BundleImpl implements Framework
                 maps[IDENTIFIER_MAP_IDX].put(new Long(0), this);
                 m_installedBundles = maps;
 
+
+                try
+                {
+                    getResolver().removeRevision(m_extensionManager.getRevision());
+                    m_extensionManager.removeExtensionBundles();
+                    m_extensionManager.updateRevision(this, m_configMap);
+                    if (!m_configMutableMap.containsKey(Constants.FRAMEWORK_SYSTEMPACKAGES))
+                    {
+                        m_configMutableMap.put(Constants.FRAMEWORK_SYSTEMPACKAGES, m_extensionManager.getRevision().getHeaders().get(Constants.EXPORT_PACKAGE));
+                    }
+                    getResolver().addRevision(m_extensionManager.getRevision());
+                }
+                catch (Exception ex)
+                {
+                    // This should not throw an exception, but if so, lets convert it to
+                    // a runtime exception.
+                    throw new BundleException("Exception creating system bundle revision", ex);
+                }
+
                 // Manually resolve the system bundle, which will cause its
                 // state to be set to RESOLVED.
                 try
@@ -766,6 +792,8 @@ public class Felix extends BundleImpl implements Framework
                 setActivator(new SystemBundleActivator());
                 setBundleContext(new BundleContextImpl(m_logger, this, this));
 
+                boolean javaVersionChanged = handleJavaVersionChange();
+
                 // Now load all cached bundles.
                 for (int i = 0; (archives != null) && (i < archives.length); i++)
                 {
@@ -789,7 +817,7 @@ public class Felix extends BundleImpl implements Framework
                         else
                         {
                             // Install the cached bundle.
-                            reloadBundle(archives[i]);
+                            reloadBundle(archives[i], javaVersionChanged);
                         }
                     }
                     catch (Exception ex)
@@ -811,6 +839,11 @@ public class Felix extends BundleImpl implements Framework
                         }
                         // TODO: FRAMEWORK - Perhaps we should remove the cached bundle?
                     }
+                }
+
+                for (Bundle extension : m_extensionManager.resolveExtensionBundles(this))
+                {
+                    m_extensionManager.startExtensionBundle(this, (BundleImpl) extension);
                 }
 
                 // Now that we have loaded all cached bundles and have determined the
@@ -925,6 +958,89 @@ public class Felix extends BundleImpl implements Framework
         }
     }
 
+    private boolean handleJavaVersionChange()
+    {
+        File dataFile = getDataFile(this, "last.java.version");
+
+        int currentVersion = 8;
+        try
+        {
+            currentVersion = Version.parseVersion(_getProperty("java.specification.version")).getMajor();
+        }
+        catch (Exception ignore)
+        {
+            getLogger().log(this, Logger.LOG_WARNING, "Unable to parse current java version", ignore);
+        }
+
+        if (currentVersion < 8)
+        {
+            currentVersion = 8;
+        }
+
+        int lastVersion = 8;
+        if (dataFile.isFile())
+        {
+            BufferedReader input = null;
+            try
+            {
+                input = new BufferedReader(new InputStreamReader(new FileInputStream(dataFile), "UTF-8"));
+                lastVersion = Version.parseVersion(input.readLine()).getMajor();
+            }
+            catch (Exception ignore)
+            {
+                getLogger().log(this, Logger.LOG_WARNING, "Unable to parse last java version", ignore);
+            }
+            finally
+            {
+                if (input != null)
+                {
+                    try
+                    {
+                        input.close();
+                    }
+                    catch (Exception ignore)
+                    {
+
+                    }
+                }
+            }
+        }
+
+        if (lastVersion < 8)
+        {
+            lastVersion = 8;
+        }
+
+        PrintWriter output = null;
+
+        try
+        {
+            output = new PrintWriter(new OutputStreamWriter(
+                new FileOutputStream(getDataFile(this, "last.java.version")), "UTF-8"));
+            output.println(Integer.toString(currentVersion));
+            output.flush();
+        }
+        catch (Exception ignore)
+        {
+            getLogger().log(this, Logger.LOG_WARNING, "Unable to persist current java version", ignore);
+        }
+        finally
+        {
+            if (output != null)
+            {
+                try
+                {
+                    output.close();
+                }
+                catch (Exception ignore)
+                {
+
+                }
+            }
+        }
+        return currentVersion != lastVersion;
+    }
+
     void setBundleProtectionDomain(BundleRevisionImpl revisionImpl) throws Exception
     {
         Object certificates = null;
@@ -1024,7 +1140,8 @@ public class Felix extends BundleImpl implements Framework
         {
             // Spec says stop() on SystemBundle should return immediately and
             // shutdown framework on another thread.
-            new Thread(new Runnable() {
+            (new Thread("FelixShutdown") 
+            {
                 @Override
                 public void run()
                 {
@@ -1040,7 +1157,7 @@ public class Felix extends BundleImpl implements Framework
                             ex);
                     }
                 }
-            }, "FelixShutdown").start();
+            }).start();
         }
     }
 
@@ -1176,6 +1293,52 @@ public class Felix extends BundleImpl implements Framework
                     catch (BundleException ex)
                     {
                         m_logger.log(Logger.LOG_WARNING, "Exception restarting framework.", ex);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    m_logger.log(Logger.LOG_WARNING, "Cannot update an inactive framework.");
+                }
+            }
+        }).start();
+    }
+
+    private void stopRefresh() throws BundleException
+    {
+        Object sm = System.getSecurityManager();
+
+        if (sm != null)
+        {
+            ((SecurityManager) sm).checkPermission(new AdminPermission(this,
+                    AdminPermission.EXECUTE));
+        }
+
+
+        // Stop the framework on a separate thread.
+        new Thread(new Runnable() {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    // First acquire the system bundle lock to verify the state.
+                    acquireBundleLock(Felix.this, Bundle.STARTING | Bundle.ACTIVE);
+                    // Set the reason for the shutdown.
+                    m_shutdownGate.setMessage(
+                            new FrameworkEvent(FrameworkEvent.STOPPED_SYSTEM_REFRESHED, Felix.this, null));
+                    // Record the state and stop the system bundle.
+                    int oldState = Felix.this.getState();
+                    try
+                    {
+                        stop();
+                    }
+                    catch (BundleException ex)
+                    {
+                        m_logger.log(Logger.LOG_WARNING, "Exception stopping framework.", ex);
+                    }
+                    finally
+                    {
+                        releaseBundleLock(Felix.this);
                     }
                 }
                 catch (Exception ex)
@@ -1472,8 +1635,6 @@ public class Felix extends BundleImpl implements Framework
      *        bundles.
      * @throws java.lang.IllegalArgumentException If the specified start
      *         level is not greater than zero.
-     * @throws java.security.SecurityException If the caller does not
-     *         have <tt>AdminPermission</tt>.
     **/
     void setInitialBundleStartLevel(int startLevel)
     {
@@ -1513,8 +1674,6 @@ public class Felix extends BundleImpl implements Framework
      * @throws java.lang.IllegalArgumentException If the specified
      *          bundle is the system bundle or if the bundle has been
      *          uninstalled.
-     * @throws java.security.SecurityException If the caller does not
-     *          have <tt>AdminPermission</tt>.
     **/
     void setBundleStartLevel(Bundle bundle, int startLevel)
     {
@@ -1957,7 +2116,7 @@ public class Felix extends BundleImpl implements Framework
             {
                 throw new BundleException(
                     "Bundle " + bundle
-                    + " cannot be started, since it is either starting or stopping.");
+                    + " cannot be started: " + ex.getMessage());
             }
         }
 
@@ -2212,15 +2371,27 @@ public class Felix extends BundleImpl implements Framework
             {
                 return;
             }
-
-            // Fire STARTING event to signify call to bundle activator.
-            fireBundleEvent(BundleEvent.STARTING, bundle);
-
+            
+            Throwable rethrow = null;
             try
             {
                 // Set the bundle's activator.
                 bundle.setActivator(createBundleActivator(bundle));
+            }
+            catch (Throwable th) 
+            {
+                rethrow = th;
+            }
 
+            try
+            {
+                // Fire STARTING event to signify call to bundle activator.
+                fireBundleEvent(BundleEvent.STARTING, bundle);
+                
+                if (rethrow != null) 
+                {
+                    throw rethrow;
+                }
                 // Activate the bundle if it has an activator.
                 if (bundle.getActivator() != null)
                 {
@@ -2302,7 +2473,7 @@ public class Felix extends BundleImpl implements Framework
         // Acquire bundle lock.
         try
         {
-            acquireBundleLock(bundle, Bundle.INSTALLED | Bundle.RESOLVED | Bundle.ACTIVE);
+            acquireBundleLock(bundle, Bundle.INSTALLED | Bundle.RESOLVED | Bundle.ACTIVE | Bundle.STARTING | Bundle.STOPPING);
         }
         catch (IllegalStateException ex)
         {
@@ -2314,7 +2485,7 @@ public class Felix extends BundleImpl implements Framework
             {
                 throw new BundleException(
                     "Bundle " + bundle
-                    + " cannot be update, since it is either starting or stopping.");
+                    + " cannot be update: " + ex.getMessage());
             }
         }
 
@@ -2322,6 +2493,18 @@ public class Felix extends BundleImpl implements Framework
         // in a finally block.
         try
         {
+            // Check if the bundle is not currently STARTING or STOPPING because if it is
+            // we are in a loop where the bundle being started or stopped triggered an update
+            // of itself (either directly or indirectly) which we can not handle.
+            if ((bundle.getState() == Bundle.STARTING && (!bundle.isDeclaredActivationPolicyUsed()
+                    || ((BundleRevisionImpl) bundle.adapt(BundleRevision.class))
+                    .getDeclaredActivationPolicy() != BundleRevisionImpl.LAZY_ACTIVATION )) ||
+                    bundle.getState() == Bundle.STOPPING)
+            {
+                throw new IllegalStateException("Bundle " + bundle
+                    + " cannot be update, since it is either STARTING or STOPPING.");
+            }
+            
             // Variable to indicate whether bundle is active or not.
             Throwable rethrow = null;
 
@@ -2377,11 +2560,7 @@ public class Felix extends BundleImpl implements Framework
                         // then attach the extension
                         if (!wasExtension && bundle.isExtension())
                         {
-                            m_extensionManager.addExtensionBundle(this, bundle);
-// TODO: REFACTOR - Perhaps we could move this into extension manager.
-                            m_resolver.addRevision(m_extensionManager.getRevision());
-// TODO: REFACTOR - Not clear why this is here. We should look at all of these steps more closely.
-                            setBundleStateAndNotify(bundle, Bundle.RESOLVED);
+                            m_extensionManager.addExtensionBundle(bundle);
                         }
                         else if (wasExtension)
                         {
@@ -2426,9 +2605,10 @@ public class Felix extends BundleImpl implements Framework
                 {
                     setBundleStateAndNotify(bundle, Bundle.INSTALLED);
                 }
-                else
+
+                for (Bundle extension : m_extensionManager.resolveExtensionBundles(this))
                 {
-                    m_extensionManager.startExtensionBundle(this, bundle);
+                    m_extensionManager.startExtensionBundle(this, (BundleImpl) extension);
                 }
 
                 fireBundleEvent(BundleEvent.UNRESOLVED, bundle);
@@ -2539,7 +2719,7 @@ public class Felix extends BundleImpl implements Framework
             {
                 throw new BundleException(
                     "Bundle " + bundle
-                    + " cannot be stopped since it is already stopping.");
+                    + " cannot be stopped: " + ex.getMessage());
             }
         }
 
@@ -2697,12 +2877,24 @@ public class Felix extends BundleImpl implements Framework
             {
                 throw new BundleException(
                     "Bundle " + bundle
-                    + " cannot be uninstalled since it is stopping.");
+                    + " cannot be uninstalled: " + ex.getMessage());
             }
         }
 
         try
         {
+            // Check if the bundle is not currently STARTING or STOPPING because if it is
+            // we are in a loop where the bundle being started or stopped triggered a state change
+            // of itself (either directly or indirectly) which we can not handle.
+            if ((bundle.getState() == Bundle.STARTING && (!bundle.isDeclaredActivationPolicyUsed()
+                || ((BundleRevisionImpl) bundle.adapt(BundleRevision.class))
+                .getDeclaredActivationPolicy() != BundleRevisionImpl.LAZY_ACTIVATION )) ||
+                bundle.getState() == Bundle.STOPPING)
+            {
+                throw new IllegalStateException("Bundle " + bundle
+                        + " cannot be uninstalled, since it is either STARTING or STOPPING.");
+            }
+
             // The spec says that uninstall should always succeed, so
             // catch an exception here if stop() doesn't succeed and
             // rethrow it at the end.
@@ -2786,46 +2978,57 @@ public class Felix extends BundleImpl implements Framework
         {
             // Populate a set of refresh candidates. This also includes any bundles that this bundle
             // is wired to but have previously been uninstalled.
-            List<Bundle> refreshCandidates = new ArrayList<Bundle>();
-            refreshCandidates.add(bundle); // Add this bundle first, so that it gets refreshed first
-            BundleRevisions bundleRevisions = bundle.adapt(BundleRevisions.class);
-            if (bundleRevisions != null)
-            {
-                for (BundleRevision br : bundleRevisions.getRevisions())
-                {
-                    BundleWiring bw = br.getWiring();
-                    if (bw != null)
-                    {
-                        for (BundleWire wire : bw.getRequiredWires(null))
-                        {
-                            Bundle b = wire.getProvider().getBundle();
-                            if (Bundle.UNINSTALLED == b.getState() && !refreshCandidates.contains(b))
-                                refreshCandidates.add(b);
-                        }
-                    }
-                }
-            }
+            Set<Bundle> refreshCandidates = addUninstalled(bundle, new LinkedHashSet<Bundle>());
 
             try
             {
+                // First see if we can throw away the complete graph
+                Set<Bundle> dependent = new HashSet<Bundle>();
                 for (Bundle b : refreshCandidates)
                 {
-                    // If the bundle is not used by anyone, then garbage
-                    // collect it now.
-                    if (!m_dependencies.hasDependents(b))
+                    populateDependentGraph(b, dependent);
+                }
+
+                if (refreshCandidates.containsAll(dependent))
+                {
+                    try
                     {
-                        try
-                        {
-                            List<Bundle> list = Collections.singletonList(b);
-                            refreshPackages(list, null);
-                        }
-                        catch (Exception ex)
-                        {
-                            m_logger.log(b,
-                                Logger.LOG_ERROR,
-                                "Unable to immediately garbage collect the bundle.", ex);
-                        }
+                        refreshPackages(refreshCandidates, null);
                     }
+                    catch (Exception ex)
+                    {
+                        m_logger.log(this, Logger.LOG_ERROR, "Unable to immediately garbage collect bundles.", ex);
+                    }
+                }
+                // Otherwise, try to remove one candidate at a time
+                else
+                {
+                    boolean progress;
+                    do
+                    {
+                        // The idea is to keep trying as long as we make progress (ie., managed to gc a bundle)
+                        progress = false;
+                        for (Iterator<Bundle> iter = refreshCandidates.iterator(); iter.hasNext();)
+                        {
+                            Bundle b = iter.next();
+                            // If the bundle is not used by anyone, then garbage
+                            // collect it now.
+                            if (!m_dependencies.hasDependents(b))
+                            {
+                                iter.remove();
+                                try
+                                {
+                                    List<Bundle> list = Collections.singletonList(b);
+                                    refreshPackages(list, null);
+                                    progress = true;
+                                }
+                                catch (Exception ex)
+                                {
+                                    m_logger.log(b, Logger.LOG_ERROR, "Unable to immediately garbage collect the bundle.", ex);
+                                }
+                            }
+                        }
+                    } while (progress);
                 }
             }
             finally
@@ -2834,6 +3037,37 @@ public class Felix extends BundleImpl implements Framework
                 releaseGlobalLock();
             }
         }
+    }
+
+    private Set<Bundle> addUninstalled(Bundle bundle, Set<Bundle> refreshCandidates)
+    {
+        refreshCandidates.add(bundle); // Add this bundle first, so that it gets refreshed first
+        BundleRevisions bundleRevisions = bundle.adapt(BundleRevisions.class);
+        if (bundleRevisions != null)
+        {
+            for (BundleRevision br : bundleRevisions.getRevisions())
+            {
+                BundleWiring bw = br.getWiring();
+                if (bw != null)
+                {
+                    for (BundleWire wire : bw.getRequiredWires(null))
+                    {
+                        Bundle b = wire.getProvider().getBundle();
+                        if (b.getState() == Bundle.UNINSTALLED && !refreshCandidates.contains(b))
+                            refreshCandidates = addUninstalled(b, refreshCandidates);
+                    }
+                }
+            }
+        }
+        Set<Bundle> dependent = populateDependentGraph(bundle, new HashSet<Bundle>());
+        for (Bundle b : dependent)
+        {
+            if (b.getState() == Bundle.UNINSTALLED && !refreshCandidates.contains(b))
+            {
+                refreshCandidates = addUninstalled(b, refreshCandidates);
+            }
+        }
+        return refreshCandidates;
     }
 
     //
@@ -2850,12 +3084,20 @@ public class Felix extends BundleImpl implements Framework
     String getProperty(String key)
     {
         // First, check the config properties.
-        String val = (String) m_configMap.get(key);
+        Object val = m_configMap.get(key);
         // If not found, then try the system properties.
-        return (val == null) ? System.getProperty(key) : val;
+        return !(val instanceof String) ? System.getProperty(key) : (String) val;
     }
 
-    private Bundle reloadBundle(BundleArchive ba)
+    String _getProperty(String key)
+    {
+        // First, check the config properties.
+        Object val = m_configMap.get(key);
+        // If not found, then try the system properties.
+        return !(val instanceof String) ? m_secureAction.getSystemProperty(key, null) : (String) val;
+    }
+
+    private Bundle reloadBundle(BundleArchive ba, boolean updateMulti)
         throws BundleException
     {
         BundleImpl bundle = null;
@@ -2892,11 +3134,25 @@ public class Felix extends BundleImpl implements Framework
             {
                 bundle = new BundleImpl(this, null, ba);
 
+                if (updateMulti)
+                {
+                    try
+                    {
+                        if ("true".equals(bundle.adapt(BundleRevisionImpl.class).getHeaders().get("Multi-Release")))
+                        {
+                            ba.setLastModified(System.currentTimeMillis());
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        getLogger().log(this, Logger.LOG_WARNING, "Unable to update multi-release bundle last modified", ex);
+                    }
+                }
+
                 // Extensions are handled as a special case.
                 if (bundle.isExtension())
                 {
-                    m_extensionManager.addExtensionBundle(this, bundle);
-                    m_resolver.addRevision(m_extensionManager.getRevision());
+                    m_extensionManager.addExtensionBundle(bundle);
                 }
 
                 // Use a copy-on-write approach to add the bundle
@@ -2929,11 +3185,6 @@ public class Felix extends BundleImpl implements Framework
             {
                 throw new BundleException("Could not create bundle object.", ex);
             }
-        }
-
-        if (bundle.isExtension())
-        {
-            m_extensionManager.startExtensionBundle(this, bundle);
         }
 
         return bundle;
@@ -3021,8 +3272,7 @@ public class Felix extends BundleImpl implements Framework
                     }
                     else
                     {
-                        m_extensionManager.addExtensionBundle(this, bundle);
-                        m_resolver.addRevision(m_extensionManager.getRevision());
+                        m_extensionManager.addExtensionBundle(bundle);
                     }
                 }
                 catch (Throwable ex)
@@ -3085,9 +3335,9 @@ public class Felix extends BundleImpl implements Framework
                     releaseGlobalLock();
                 }
 
-                if (bundle.isExtension())
+                for (Bundle extension : m_extensionManager.resolveExtensionBundles(this))
                 {
-                    m_extensionManager.startExtensionBundle(this, bundle);
+                    m_extensionManager.startExtensionBundle(this, (BundleImpl) extension);
                 }
             }
         }
@@ -3127,7 +3377,7 @@ public class Felix extends BundleImpl implements Framework
                         try
                         {
                             m_secureAction.invokeBundleFindHook(
-                                fh, origin.getBundleContext(), bundles);
+                                fh, ((BundleImpl) origin)._getBundleContext(), bundles);
                         }
                         catch (Throwable th)
                         {
@@ -4188,6 +4438,7 @@ public class Felix extends BundleImpl implements Framework
         try
         {
             boolean restart = false;
+            boolean extensionBundle = false;
 
             Bundle systemBundle = this;
 
@@ -4198,9 +4449,14 @@ public class Felix extends BundleImpl implements Framework
             {
                 for (Bundle b : bundles)
                 {
-                    if ((systemBundle == b) || ((BundleImpl) b).isExtension())
+                    if (systemBundle == b)
                     {
                         restart = true;
+                    }
+                    else if (((BundleImpl) b).isExtension())
+                    {
+                        restart = true;
+                        extensionBundle = true;
                         break;
                     }
                 }
@@ -4257,13 +4513,25 @@ public class Felix extends BundleImpl implements Framework
                 }
                 else
                 {
-                    try
+                    if (!extensionBundle)
                     {
-                        update();
+                        try
+                        {
+                            update();
+                        }
+                        catch (BundleException ex) {
+                            m_logger.log(Logger.LOG_ERROR, "Framework restart error.", ex);
+                        }
                     }
-                    catch (BundleException ex)
+                    else
                     {
-                        m_logger.log(Logger.LOG_ERROR, "Framework restart error.", ex);
+                        try
+                        {
+                            stopRefresh();
+                        }
+                        catch (BundleException ex) {
+                            m_logger.log(Logger.LOG_ERROR, "Framework stop error.", ex);
+                        }
                     }
                 }
             }
@@ -4338,7 +4606,7 @@ public class Felix extends BundleImpl implements Framework
     }
 
     // Calls to this method must have the global lock.
-    private void populateDependentGraph(BundleImpl exporter, Set<Bundle> set)
+    private Set<Bundle> populateDependentGraph(Bundle exporter, Set<Bundle> set)
     {
         // Get all dependent bundles of this bundle.
         Set<Bundle> dependents = m_dependencies.getDependentBundles(exporter);
@@ -4353,10 +4621,11 @@ public class Felix extends BundleImpl implements Framework
                     // Add each dependent bundle to set.
                     set.add(b);
                     // Now recurse into each bundle to get its dependents.
-                    populateDependentGraph((BundleImpl) b, set);
+                    set = populateDependentGraph((BundleImpl) b, set);
                 }
             }
         }
+        return set;
     }
 
     Collection<Bundle> getRemovalPendingBundles()
@@ -4551,7 +4820,7 @@ public class Felix extends BundleImpl implements Framework
      * Fires service events.
      *
      * @param event The service event to fire.
-     * @param reg The service registration associated with the service object.
+     * @param oldProps The old props of the service.
     **/
     private void fireServiceEvent(ServiceEvent event, Dictionary oldProps)
     {
@@ -4572,14 +4841,8 @@ public class Felix extends BundleImpl implements Framework
             FelixConstants.FRAMEWORK_VENDOR,
             FelixConstants.FRAMEWORK_VENDOR_VALUE);
         m_configMutableMap.put(
-            FelixConstants.FRAMEWORK_LANGUAGE,
-            System.getProperty("user.language"));
-        m_configMutableMap.put(
-            FelixConstants.FRAMEWORK_OS_VERSION,
-            System.getProperty("os.version"));
-        m_configMutableMap.put(
             FelixConstants.SUPPORTS_FRAMEWORK_EXTENSION,
-            "true");
+            ExtensionManager.m_extenderFramework != null ? "true" : "false");
         m_configMutableMap.put(
             FelixConstants.SUPPORTS_FRAMEWORK_FRAGMENT,
             "true");
@@ -4588,17 +4851,38 @@ public class Felix extends BundleImpl implements Framework
             "true");
         m_configMutableMap.put(
             FelixConstants.SUPPORTS_BOOTCLASSPATH_EXTENSION,
-            "false");
+            ExtensionManager.m_extenderBoot != null ? "true" : "false");
 
         String s = null;
-        s = NativeLibraryClause.normalizeOSName(System.getProperty("os.name"));
-        m_configMutableMap.put(FelixConstants.FRAMEWORK_OS_NAME, s);
-        s = NativeLibraryClause.normalizeProcessor(System.getProperty("os.arch"));
-        m_configMutableMap.put(FelixConstants.FRAMEWORK_PROCESSOR, s);
+        if (!m_configMutableMap.containsKey(FelixConstants.FRAMEWORK_OS_NAME))
+        {
+            s = NativeLibraryClause.normalizeOSName(System.getProperty("os.name"));
+            m_configMutableMap.put(FelixConstants.FRAMEWORK_OS_NAME, s);
+        }
+        
+        if ( !m_configMutableMap.containsKey(FelixConstants.FRAMEWORK_PROCESSOR))
+        {
+            s = NativeLibraryClause.normalizeProcessor(System.getProperty("os.arch"));
+            m_configMutableMap.put(FelixConstants.FRAMEWORK_PROCESSOR, s);
+        }
+        
+        if ( !m_configMutableMap.containsKey(FelixConstants.FRAMEWORK_OS_VERSION))
+        {
+            m_configMutableMap.put(FelixConstants.FRAMEWORK_OS_VERSION,
+                NativeLibraryClause.normalizeOSVersion(System.getProperty("os.version")));
+        }
+        if (!m_configMutableMap.containsKey(FelixConstants.FRAMEWORK_LANGUAGE))
+        {
+            m_configMutableMap.put(FelixConstants.FRAMEWORK_LANGUAGE,
+                System.getProperty("user.language"));
+        }
         m_configMutableMap.put(
             FelixConstants.FELIX_VERSION_PROPERTY, getFrameworkVersion());
 
         Properties defaultProperties = Util.loadDefaultProperties(m_logger);
+
+        Util.initializeJPMSEE(_getProperty("java.specification.version"), defaultProperties, m_logger);
+
         // Set supported execution environments to default value,
         // if not explicitly configured.
         loadFromDefaultIfNotDefined(defaultProperties, Constants.FRAMEWORK_EXECUTIONENVIRONMENT);
@@ -4614,7 +4898,7 @@ public class Felix extends BundleImpl implements Framework
         String s;
         if (!getConfig().containsKey(propertyName))
         {
-            s = Util.getDefaultProperty(m_logger, propertyName);
+            s = Util.getPropertyWithSubs(defaultProperties, propertyName);
             if (s != null)
             {
                 m_configMutableMap.put(propertyName, s);
@@ -4624,7 +4908,7 @@ public class Felix extends BundleImpl implements Framework
 
     private void loadPrefixFromDefaultIfNotDefined(Map configMap, Properties defaultProperties, String prefix)
     {
-        Map<String, String> defaultPropsWithPrefix = Util.getDefaultPropertiesWithPrefix(defaultProperties, prefix);
+        Map<String, String> defaultPropsWithPrefix = Util.getPropertiesWithPrefix(defaultProperties, prefix);
 
         for(String currentDefaultProperty: defaultPropsWithPrefix.keySet())
         {
@@ -4669,8 +4953,8 @@ public class Felix extends BundleImpl implements Framework
 
         // Maven uses a '-' to separate the version qualifier,
         // while OSGi uses a '.', so we need to convert to a '.'
-        StringBuffer sb =
-            new StringBuffer(
+        StringBuilder sb =
+            new StringBuilder(
                 props.getProperty(
                     FelixConstants.FELIX_VERSION_PROPERTY, "0.0.0"));
         String toRet = cleanMavenVersion(sb);
@@ -4693,7 +4977,7 @@ public class Felix extends BundleImpl implements Framework
      * @param sb The version to be cleaned
      * @return The cleaned version
      */
-    private static String cleanMavenVersion(StringBuffer sb)
+    private static String cleanMavenVersion(StringBuilder sb)
     {
         int dots = 0;
         for (int i = 0; i < sb.length(); i++)
@@ -4951,11 +5235,6 @@ public class Felix extends BundleImpl implements Framework
             }
 
             m_dependencies.removeDependents(adapt(BundleRevision.class));
-
-            if (m_extensionManager != null)
-            {
-                m_extensionManager.removeExtensions(Felix.this);
-            }
 
             // Dispose of the bundle cache.
             m_cache.release();

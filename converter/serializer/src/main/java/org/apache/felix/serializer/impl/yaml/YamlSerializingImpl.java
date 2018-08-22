@@ -18,36 +18,31 @@ package org.apache.felix.serializer.impl.yaml;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.lang.reflect.Array;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
 
-import org.osgi.service.converter.ConversionException;
-import org.osgi.service.converter.Converter;
-import org.osgi.service.serializer.Serializing;
+import org.apache.felix.serializer.Serializing;
+import org.apache.felix.serializer.Writer;
+import org.apache.felix.serializer.impl.AbstractSpecifying;
+import org.osgi.util.converter.ConversionException;
+import org.osgi.util.converter.Converter;
 
-public class YamlSerializingImpl implements Serializing {
-    private final Converter converter;
-    private final Map<String, Object> configuration;
+public class YamlSerializingImpl extends AbstractSpecifying<Serializing> implements Serializing {
+    private volatile Converter converter;
+    private volatile boolean useCustomWriter;
+    private volatile Writer writer;
     private final Object object;
-    private final int indentation = 2;
 
-    public YamlSerializingImpl(Converter c, Map<String, Object> cfg, Object obj) {
+    public YamlSerializingImpl(Converter c, Writer w, Object obj) {
         converter = c;
-        configuration = cfg;
+        writer = w;
         object = obj;
     }
 
     @Override
     public Appendable to(Appendable out) {
         try {
-            out.append(encode(object));
+            out.append(writer.write(object));
             return out;
         } catch (IOException e) {
             throw new ConversionException("Problem converting to YAML", e);
@@ -63,7 +58,7 @@ public class YamlSerializingImpl implements Serializing {
     @Override
     public void to(OutputStream os, Charset charset) {
         try {
-            os.write(encode(object).getBytes(charset));
+            os.write(writer.write(object).getBytes(charset));
         } catch (IOException e) {
             throw new ConversionException("Problem converting to YAML", e);
         }
@@ -71,85 +66,29 @@ public class YamlSerializingImpl implements Serializing {
 
     @Override
     public String toString() {
-        return encode(object);
-    }
-
-    private String encode(Object obj) {
-        return encode(obj, 0);
-    }
-
-    @SuppressWarnings("rawtypes")
-    private String encode(Object obj, int level) {
-        if (obj == null)
-            return "";
-
-        if (obj instanceof Map) {
-            return encodeMap((Map) obj, level);
-        } else if (obj instanceof Collection) {
-            return encodeCollection((Collection) obj, level);
-        } else if (obj.getClass().isArray()) {
-            return encodeCollection(asCollection(obj), level);
-        } else if (obj instanceof Number)  {
-            return obj.toString();
-        } else if (obj instanceof Boolean) {
-            return obj.toString();
-        }
-
-        return "'" + converter.convert(obj).to(String.class) + "'";
-    }
-
-    private Collection<?> asCollection(Object arr) {
-        // Arrays.asList() doesn't work for primitive arrays
-        int len = Array.getLength(arr);
-        List<Object> l = new ArrayList<>(len);
-        for (int i=0; i<len; i++) {
-            l.add(Array.get(arr, i));
-        }
-        return l;
-    }
-
-    private String encodeCollection(Collection<?> collection, int level) {
-        StringBuilder sb = new StringBuilder();
-        for (Object o : collection) {
-            sb.append("\n");
-            sb.append(getIdentPrefix(level));
-            sb.append("- ");
-            sb.append(encode(o, level + 1));
-        }
-        return sb.toString();
-    }
-
-    @SuppressWarnings({ "rawtypes", "unchecked" })
-    private String encodeMap(Map m, int level) {
-        StringBuilder sb = new StringBuilder();
-        for (Entry entry : (Set<Entry>) m.entrySet()) {
-            sb.append("\n");
-            sb.append(getIdentPrefix(level));
-            sb.append(entry.getKey().toString());
-            sb.append(": ");
-            sb.append(encode(entry.getValue(), level + 1));
-        }
-
-        return sb.toString();
-    }
-
-    private String getIdentPrefix(int level) {
-        int numSpaces = indentation * level;
-        StringBuilder sb = new StringBuilder(numSpaces);
-        for (int i=0; i < numSpaces; i++)
-            sb.append(' ');
-        return sb.toString();
+        return writer.write(object);
     }
 
     @Override
-    public Serializing pretty() {
-        // TODO Auto-generated method stub
-        return null;
+    public Serializing convertWith(Converter c) {
+        converter = c;
+        if (!useCustomWriter)
+            writer = new DefaultYamlWriter(converter);
+        return this;
     }
 
     @Override
-    public Serializing ignoreNull() {
-        // TODO Auto-generated method stub
+    public Serializing writeWith(Writer w) {
+        writer = w;
+        useCustomWriter = true;
+        return this;
+    }
+
+
+    // TODO: what is intended here??
+    @Override
+    public Serializing view()
+    {
         return null;
     }
 }

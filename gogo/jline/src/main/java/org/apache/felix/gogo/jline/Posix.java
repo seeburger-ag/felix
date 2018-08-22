@@ -71,7 +71,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.apache.felix.gogo.api.Process;
+import org.apache.felix.service.command.Process;
 import org.apache.felix.gogo.jline.Shell.Context;
 import org.apache.felix.service.command.CommandProcessor;
 import org.apache.felix.service.command.CommandSession;
@@ -81,14 +81,14 @@ import org.jline.builtins.Nano;
 import org.jline.builtins.Options;
 import org.jline.builtins.Source;
 import org.jline.builtins.Source.PathSource;
-import org.jline.builtins.Source.StdInSource;
+import org.jline.builtins.TTop;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
-import org.jline.utils.AttributedStyle;
 import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.OSUtils;
+import org.jline.utils.StyleResolver;
 
 /**
  * Posix-like utilities.
@@ -98,14 +98,32 @@ import org.jline.utils.OSUtils;
  */
 public class Posix {
 
-    static final String[] functions = {
-            "cat", "echo", "grep", "sort", "sleep", "cd", "pwd", "ls",
-            "less", "watch", "nano", "tmux",
-            "head", "tail", "clear", "wc",
-            "date"
-    };
+    static final String[] functions;
+
+    static {
+        // TTop function is new in JLine 3.2
+        String[] func;
+        try {
+            Class cl = TTop.class;
+            func = new String[] {
+                    "cat", "echo", "grep", "sort", "sleep", "cd", "pwd", "ls",
+                    "less", "watch", "nano", "tmux",
+                    "head", "tail", "clear", "wc",
+                    "date", "ttop",
+            };
+        } catch (Throwable t) {
+            func = new String[] {
+                    "cat", "echo", "grep", "sort", "sleep", "cd", "pwd", "ls",
+                    "less", "watch", "nano", "tmux",
+                    "head", "tail", "clear", "wc",
+                    "date"
+            };
+        }
+        functions = func;
+    }
 
     public static final String DEFAULT_LS_COLORS = "dr=1;91:ex=1;92:sl=1;96:ot=34;43";
+    public static final String DEFAULT_GREP_COLORS = "mt=1;31:fn=35:ln=32:se=36";
 
     private static final LinkOption[] NO_FOLLOW_OPTIONS = new LinkOption[]{LinkOption.NOFOLLOW_LINKS};
     private static final List<String> WINDOWS_EXECUTABLE_EXTENSIONS = Collections.unmodifiableList(Arrays.asList(".bat", ".exe", ".cmd"));
@@ -121,7 +139,7 @@ public class Posix {
         if (argv == null || argv.length < 1) {
             throw new IllegalArgumentException();
         }
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         try {
             run(session, process, argv);
         } catch (IllegalArgumentException e) {
@@ -131,7 +149,7 @@ public class Posix {
             process.err().println(e.getMessage());
             process.error(0);
         } catch (Exception e) {
-            process.err().println(argv[0] + ": " + e.getMessage());
+            process.err().println(argv[0] + ": " + e.toString());
             process.error(1);
         }
     }
@@ -194,6 +212,9 @@ public class Posix {
                 break;
             case "tmux":
                 tmux(session, process, argv);
+                break;
+            case "ttop":
+                ttop(session, process, argv);
                 break;
             case "clear":
                 clear(session, process, argv);
@@ -358,7 +379,7 @@ public class Posix {
         }
         for (String arg : opt.args()) {
             if ("-".equals(arg)) {
-                sources.add(new StdInSource());
+                sources.add(new StdInSource(process));
             } else {
                 sources.add(new PathSource(session.currentDir().resolve(arg), arg));
             }
@@ -500,7 +521,7 @@ public class Posix {
         }
         for (String arg : opt.args()) {
             if ("-".equals(arg)) {
-                sources.add(new StdInSource());
+                sources.add(new StdInSource(process));
             } else {
                 sources.add(new PathSource(session.currentDir().resolve(arg), arg));
             }
@@ -586,7 +607,7 @@ public class Posix {
                     try {
                         InputStream is;
                         if ("-".equals(name)) {
-                            is = new Source.StdInSource().read();
+                            is = new StdInSource(process).read();
                         } else {
                             path = session.currentDir().resolve(name);
                             is = Files.newInputStream(path);
@@ -796,6 +817,10 @@ public class Posix {
         }
     }
 
+    protected void ttop(final CommandSession session, Process process, String[] argv) throws Exception {
+        TTop.ttop(Shell.getTerminal(session), process.out(), process.err(), argv);
+    }
+
     protected void nano(final CommandSession session, Process process, String[] argv) throws Exception {
         final String[] usage = {
                 "nano -  edit files",
@@ -866,20 +891,32 @@ public class Posix {
     }
 
     protected void less(CommandSession session, Process process, String[] argv) throws Exception {
-        final String[] usage = {
+        String[] usage = {
                 "less -  file pager",
                 "Usage: less [OPTIONS] [FILES]",
                 "  -? --help                    Show help",
                 "  -e --quit-at-eof             Exit on second EOF",
                 "  -E --QUIT-AT-EOF             Exit on EOF",
+                "  -F --quit-if-one-screen      Exit if entire file fits on first screen",
                 "  -q --quiet --silent          Silent mode",
                 "  -Q --QUIET --SILENT          Completely  silent",
                 "  -S --chop-long-lines         Do not fold long lines",
                 "  -i --ignore-case             Search ignores lowercase case",
                 "  -I --IGNORE-CASE             Search ignores all case",
                 "  -x --tabs                    Set tab stops",
-                "  -N --LINE-NUMBERS            Display line number for each line"
+                "  -N --LINE-NUMBERS            Display line number for each line",
+                "     --no-init                 Disable terminal initialization",
+                "     --no-keypad               Disable keypad handling"
         };
+        boolean hasExtendedOptions = false;
+        try {
+            Less.class.getField("quitIfOneScreen");
+            hasExtendedOptions = true;
+        } catch (NoSuchFieldException e) {
+            List<String> ustrs = new ArrayList<>(Arrays.asList(usage));
+            ustrs.removeIf(s -> s.contains("--quit-if-one-screen") || s.contains("--no-init") || s.contains("--no-keypad"));
+            usage = ustrs.toArray(new String[ustrs.size()]);
+        }
         Options opt = parseOptions(session, usage, argv);
         List<Source> sources = new ArrayList<>();
         if (opt.args().isEmpty()) {
@@ -887,7 +924,7 @@ public class Posix {
         }
         for (String arg : opt.args()) {
             if ("-".equals(arg)) {
-                sources.add(new StdInSource());
+                sources.add(new StdInSource(process));
             } else {
                 sources.add(new PathSource(session.currentDir().resolve(arg), arg));
             }
@@ -914,6 +951,11 @@ public class Posix {
             less.tabs = opt.getNumber("tabs");
         }
         less.printLineNumbers = opt.isSet("LINE-NUMBERS");
+        if (hasExtendedOptions) {
+            Less.class.getField("quitIfOneScreen").set(less, opt.isSet("quit-if-one-screen"));
+            Less.class.getField("noInit").set(less, opt.isSet("no-init"));
+            Less.class.getField("noKeypad").set(less, opt.isSet("no-keypad"));
+        }
         less.run(sources);
     }
 
@@ -956,7 +998,7 @@ public class Posix {
         List<String> sortFields = opt.getList("key");
 
         char sep = (separator == null || separator.length() == 0) ? '\0' : separator.charAt(0);
-        Collections.sort(lines, new SortComparator(caseInsensitive, reverse, ignoreBlanks, numeric, sep, sortFields));
+        lines.sort(new SortComparator(caseInsensitive, reverse, ignoreBlanks, numeric, sep, sortFields));
         String last = null;
         for (String s : lines) {
             if (!unique || last == null || !s.equals(last)) {
@@ -1006,6 +1048,7 @@ public class Posix {
                 "  -? --help                show help",
                 "  -1                       list one entry per line",
                 "  -C                       multi-column output",
+                "     --color=WHEN          colorize the output, may be `always', `never' or `auto'",
                 "  -a                       list entries starting with .",
                 "  -F                       append file type indicators",
                 "  -m                       comma separated",
@@ -1019,7 +1062,28 @@ public class Posix {
                 "  -h                       print sizes in human readable form"
         };
         Options opt = parseOptions(session, usage, argv);
-        Map<String, String> colors = getColorMap(session, "LS");
+        String color = opt.isSet("color") ? opt.get("color") : "auto";
+        boolean colored;
+        switch (color) {
+            case "always":
+            case "yes":
+            case "force":
+                colored = true;
+                break;
+            case "never":
+            case "no":
+            case "none":
+                colored = false;
+                break;
+            case "auto":
+            case "tty":
+            case "if-tty":
+                colored = process.isTty(1);
+                break;
+            default:
+                throw new IllegalArgumentException("invalid argument ‘" + color + "’ for ‘--color’");
+        }
+        Map<String, String> colors = colored ? getLsColorMap(session) : Collections.emptyMap();
 
         class PathEntry implements Comparable<PathEntry> {
             final Path abs;
@@ -1094,13 +1158,9 @@ public class Posix {
                     type = "";
                     suffix = "";
                 }
-                String col = colors.get(type);
                 boolean addSuffix = opt.isSet("F");
-                if (col != null && !col.isEmpty() && process.isTty(1)) { // TODO: ability to force colors if piped
-                    return "\033[" + col + "m" + path.toString() + "\033[m" + (addSuffix ? suffix : "") + link;
-                } else {
-                    return path.toString() + (addSuffix ? suffix : "") + link;
-                }
+                return applyStyle(path.toString(), colors, type)
+                        + (addSuffix ? suffix : "") + link;
             }
 
             String longDisplay() {
@@ -1194,7 +1254,7 @@ public class Posix {
                     try {
                         Map<String, Object> ta = Files.readAttributes(path, view + ":*",
                                 getLinkOptions(opt.isSet("L")));
-                        ta.entrySet().forEach(e -> attrs.putIfAbsent(e.getKey(), e.getValue()));
+                        ta.forEach(attrs::putIfAbsent);
                     } catch (IOException e) {
                         // Ignore
                     }
@@ -1273,7 +1333,7 @@ public class Posix {
             if (expanded.size() > 1) {
                 out.println(currentDir.relativize(path).toString() + ":");
             }
-            display.accept(Stream.concat(Arrays.asList(".", "..").stream().map(path::resolve), Files.list(path))
+            display.accept(Stream.concat(Stream.of(".", "..").map(path::resolve), Files.list(path))
                             .filter(filter)
                             .map(p -> new PathEntry(p, path))
                             .sorted()
@@ -1448,7 +1508,8 @@ public class Posix {
                 "     --color=WHEN          Use markers to distinguish the matching string, may be `always', `never' or `auto'",
                 "  -B --before-context=NUM  Print NUM lines of leading context before matching lines",
                 "  -A --after-context=NUM   Print NUM lines of trailing context after matching lines",
-                "  -C --context=NUM         Print NUM lines of output context"
+                "  -C --context=NUM         Print NUM lines of output context",
+                "     --pad-lines           Pad line numbers"
         };
         Options opt = parseOptions(session, usage, argv);
         List<String> args = opt.args();
@@ -1478,6 +1539,7 @@ public class Posix {
         int after = opt.isSet("after-context") ? opt.getNumber("after-context") : -1;
         int before = opt.isSet("before-context") ? opt.getNumber("before-context") : -1;
         int context = opt.isSet("context") ? opt.getNumber("context") : 0;
+        String lineFmt = opt.isSet("pad-lines") ? "%6d" : "%d";
         if (after < 0) {
             after = context;
         }
@@ -1489,6 +1551,27 @@ public class Posix {
         boolean lineNumber = opt.isSet("line-number");
         boolean count = opt.isSet("count");
         String color = opt.isSet("color") ? opt.get("color") : "auto";
+        boolean colored;
+        switch (color) {
+            case "always":
+            case "yes":
+            case "force":
+                colored = true;
+                break;
+            case "never":
+            case "no":
+            case "none":
+                colored = false;
+                break;
+            case "auto":
+            case "tty":
+            case "if-tty":
+                colored = process.isTty(1);
+                break;
+            default:
+                throw new IllegalArgumentException("invalid argument ‘" + color + "’ for ‘--color’");
+        }
+        Map<String, String> colors = colored ? getColorMap(session, "GREP", DEFAULT_GREP_COLORS) : Collections.emptyMap();
 
         List<Source> sources = new ArrayList<>();
         if (opt.args().isEmpty()) {
@@ -1496,7 +1579,7 @@ public class Posix {
         }
         for (String arg : opt.args()) {
             if ("-".equals(arg)) {
-                sources.add(new StdInSource());
+                sources.add(new StdInSource(process));
             } else {
                 sources.add(new PathSource(session.currentDir().resolve(arg), arg));
             }
@@ -1513,40 +1596,66 @@ public class Posix {
                     if (line.length() == 1 && line.charAt(0) == '\n') {
                         break;
                     }
-                    if (p.matcher(line).matches() ^ invertMatch) {
-                        AttributedStringBuilder sbl = new AttributedStringBuilder();
-                        sbl.style(AttributedStyle.DEFAULT.foreground(AttributedStyle.BLACK + AttributedStyle.BRIGHT));
-                        if (!count && sources.size() > 1) {
+                    boolean matches = p.matcher(line).matches();
+                    AttributedStringBuilder sbl = new AttributedStringBuilder();
+                    if (!count) {
+                        if (sources.size() > 1) {
+                            if (colored) {
+                                applyStyle(sbl, colors, "fn");
+                            }
                             sbl.append(source.getName());
+                            if (colored) {
+                                applyStyle(sbl, colors, "se");
+                            }
                             sbl.append(":");
                         }
-                        if (!count && lineNumber) {
-                            sbl.append(String.format("%6d  ", lineno));
+                        if (lineNumber) {
+                            if (colored) {
+                                applyStyle(sbl, colors, "ln");
+                            }
+                            sbl.append(String.format(lineFmt, lineno));
+                            if (colored) {
+                                applyStyle(sbl, colors, "se");
+                            }
+                            sbl.append((matches ^ invertMatch) ? ":" : "-");
                         }
-                        sbl.style(AttributedStyle.DEFAULT);
-                        Matcher matcher2 = p2.matcher(line);
+                        String style = matches ^ invertMatch ^ (invertMatch && colors.containsKey("rv"))
+                                ? "sl" : "cx";
+                        if (colored) {
+                            applyStyle(sbl, colors, style);
+                        }
                         AttributedString aLine = AttributedString.fromAnsi(line);
-                        AttributedStyle style = AttributedStyle.DEFAULT;
-                        if (!invertMatch && !color.equalsIgnoreCase("never")) {
-                            style = style.bold().foreground(AttributedStyle.RED);
-                        }
+                        Matcher matcher2 = p2.matcher(aLine.toString());
                         int cur = 0;
                         while (matcher2.find()) {
                             int index = matcher2.start(0);
                             AttributedString prefix = aLine.subSequence(cur, index);
                             sbl.append(prefix);
                             cur = matcher2.end();
-                            sbl.append(aLine.subSequence(index, cur), style);
+                            if (colored) {
+                                applyStyle(sbl, colors, invertMatch ? "mc" : "ms", "mt");
+                            }
+                            sbl.append(aLine.subSequence(index, cur));
+                            if (colored) {
+                                applyStyle(sbl, colors, style);
+                            }
                             nb++;
                         }
                         sbl.append(aLine.subSequence(cur, aLine.length()));
+                    }
+                    if (matches ^ invertMatch) {
                         lines.add(sbl.toAnsi(Shell.getTerminal(session)));
                         lineMatch = lines.size();
                     } else {
                         if (lineMatch != 0 & lineMatch + after + before <= lines.size()) {
                             if (!count) {
                                 if (!firstPrint && before + after > 0) {
-                                    process.out().println("--");
+                                    AttributedStringBuilder sbl2 = new AttributedStringBuilder();
+                                    if (colored) {
+                                        applyStyle(sbl2, colors, "se");
+                                    }
+                                    sbl2.append("--");
+                                    process.out().println(sbl2.toAnsi(Shell.getTerminal(session)));
                                 } else {
                                     firstPrint = false;
                                 }
@@ -1559,7 +1668,7 @@ public class Posix {
                             }
                             lineMatch = 0;
                         }
-                        lines.add(line);
+                        lines.add(sbl.toAnsi(Shell.getTerminal(session)));
                         while (lineMatch == 0 && lines.size() > before) {
                             lines.remove(0);
                         }
@@ -1568,7 +1677,12 @@ public class Posix {
                 }
                 if (!count && lineMatch > 0) {
                     if (!firstPrint && before + after > 0) {
-                        process.out().println("--");
+                        AttributedStringBuilder sbl2 = new AttributedStringBuilder();
+                        if (colored) {
+                            applyStyle(sbl2, colors, "se");
+                        }
+                        sbl2.append("--");
+                        process.out().println(sbl2.toAnsi(Shell.getTerminal(session)));
                     } else {
                         firstPrint = false;
                     }
@@ -1582,7 +1696,7 @@ public class Posix {
                 match |= nb > 0;
             }
         }
-        Process.current().error(match ? 0 : 1);
+        Process.Utils.current().error(match ? 0 : 1);
     }
 
     protected void sleep(CommandSession session, Process process, String[] argv) throws Exception {
@@ -1933,19 +2047,61 @@ public class Posix {
         return perms;
     }
 
-    public static Map<String, String> getColorMap(CommandSession session, String name) {
+    public static Map<String, String> getLsColorMap(CommandSession session) {
+        return getColorMap(session, "LS", DEFAULT_LS_COLORS);
+    }
+
+    public static Map<String, String> getColorMap(CommandSession session, String name, String def) {
         Object obj = session.get(name + "_COLORS");
         String str = obj != null ? obj.toString() : null;
-        if (str == null || !str.matches("[a-z]{2}=[0-9]+(;[0-9]+)*(:[a-z]{2}=[0-9]+(;[0-9]+)*)*")) {
-            if ("LS".equals(name)) {
-                str = DEFAULT_LS_COLORS;
-            } else {
-                str = "";
-            }
+        if (str == null) {
+            str = def;
         }
-        return Arrays.stream(str.split(":"))
+        String sep = str.matches("[a-z]{2}=[0-9]*(;[0-9]+)*(:[a-z]{2}=[0-9]*(;[0-9]+)*)*") ? ":" : " ";
+        return Arrays.stream(str.split(sep))
                 .collect(Collectors.toMap(s -> s.substring(0, s.indexOf('=')),
                                           s -> s.substring(s.indexOf('=') + 1)));
     }
 
+    static String applyStyle(String text, Map<String, String> colors, String... types) {
+        String t = null;
+        for (String type : types) {
+            if (colors.get(type) != null) {
+                t = type;
+                break;
+            }
+        }
+        return new AttributedString(text, new StyleResolver(colors::get).resolve("." + t))
+                .toAnsi();
+    }
+
+    static void applyStyle(AttributedStringBuilder sb, Map<String, String> colors, String... types) {
+        String t = null;
+        for (String type : types) {
+            if (colors.get(type) != null) {
+                t = type;
+                break;
+            }
+        }
+        sb.style(new StyleResolver(colors::get).resolve("." + t));
+    }
+
+    private static class StdInSource implements Source {
+
+        private final Process process;
+
+        StdInSource(Process process) {
+            this.process = process;
+        }
+
+        @Override
+        public String getName() {
+            return null;
+        }
+
+        @Override
+        public InputStream read() {
+            return process.in();
+        }
+    }
 }

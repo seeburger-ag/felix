@@ -47,6 +47,7 @@ import org.osgi.service.log.LogService;
  *
  * @author <a href="mailto:dev@felix.apache.org">Felix Project Team</a>
  */
+@SuppressWarnings({"rawtypes", "unchecked"})
 public class Logger implements ServiceListener {
 	private static final String LOG_SINGLE_CONTEXT = "org.apache.felix.dependencymanager.singleContextLog";
     public static final int LOG_ERROR = 1;
@@ -59,7 +60,7 @@ public class Logger implements ServiceListener {
     private final static int LOGGER_OBJECT_IDX = 0;
     private final static int LOGGER_METHOD_IDX = 1;
     private static final String ENABLED_LOG_LEVEL = "org.apache.felix.dependencymanager.loglevel";
-    private ServiceReference m_logRef = null;
+	private ServiceReference m_logRef = null;
     private Object[] m_logger = null;
     private int m_enabledLevel = LogService.LOG_WARNING;
     private String m_debugKey;
@@ -172,7 +173,7 @@ public class Logger implements ServiceListener {
      * there will never be a log service present since the system bundle is
      * started before every other bundle.
      */
-    private synchronized void startListeningForLogService() {
+	private synchronized void startListeningForLogService() {
         try {
             // add a service listener for log services, carefully avoiding any code dependency on it
             m_context.addServiceListener(this, "(objectClass=org.osgi.service.log.LogService)");
@@ -269,19 +270,27 @@ public class Logger implements ServiceListener {
     // --------------- Convenient helper log methods --------------------------------------------
     
     public void err(String format, Object... params) {
-        log(LogService.LOG_ERROR, String.format(format, params));        
+    	if (m_enabledLevel >= LOG_ERROR) {
+    		log(LogService.LOG_ERROR, String.format(format, params));
+    	}
     }
 
     public void err(String format, Throwable err, Object... params) {
-        log(LogService.LOG_ERROR, String.format(format, params), err);        
+    	if (m_enabledLevel >= LOG_ERROR) {
+    		log(LogService.LOG_ERROR, String.format(format, params), err);
+    	}
     }
 
     public void warn(String format, Object... params) {
-        log(LogService.LOG_WARNING, String.format(format, params));        
+    	if (m_enabledLevel >= LOG_WARNING) {
+    		log(LogService.LOG_WARNING, String.format(format, params));   
+    	}
     }
 
     public void warn(String format, Throwable err, Object... params) {
-        log(LogService.LOG_WARNING, String.format(format, params), err);        
+    	if (m_enabledLevel >= LOG_WARNING) {
+    		log(LogService.LOG_WARNING, String.format(format, params), err);       
+    	}
     }
 
     public boolean info() {
@@ -289,11 +298,15 @@ public class Logger implements ServiceListener {
     }
 
     public void info(String format, Object... params) {
-        log(LogService.LOG_INFO, String.format(format, params));        
+    	if (info()) {
+    		log(LogService.LOG_INFO, String.format(format, params));
+    	}
     }
 
     public void info(String format, Throwable err, Object... params) {
-        log(LogService.LOG_INFO, String.format(format, params), err);        
+    	if (info()) {
+    		log(LogService.LOG_INFO, String.format(format, params), err);      
+    	} 
     }
 
     public boolean debug() {
@@ -301,10 +314,14 @@ public class Logger implements ServiceListener {
     }
 
     public void debug(String format, Object... params) {
-        log(LogService.LOG_DEBUG, String.format(format, params));        
+    	if (debug()) {
+    		log(LogService.LOG_DEBUG, String.format(format, params));
+    	}
     }
 
     public void debug(String format, Throwable err, Object... params) {
-        log(LogService.LOG_DEBUG, String.format(format, params), err);        
+    	if (debug()) {
+    		log(LogService.LOG_DEBUG, String.format(format, params), err);
+    	}
     }
 }

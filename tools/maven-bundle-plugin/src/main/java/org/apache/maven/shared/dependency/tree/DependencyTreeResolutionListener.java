@@ -32,7 +32,6 @@ import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.resolver.ResolutionListener;
 import org.apache.maven.artifact.resolver.ResolutionListenerForDepMgmt;
 import org.apache.maven.artifact.versioning.VersionRange;
-import org.apache.maven.shared.dependency.tree.traversal.CollectingDependencyNodeVisitor;
 import org.codehaus.plexus.logging.Logger;
 
 
@@ -386,7 +385,7 @@ public class DependencyTreeResolutionListener implements ResolutionListener, Res
      * Gets a list of all dependency nodes in the computed dependency tree.
      * 
      * @return a list of dependency nodes
-     * @deprecated As of 1.1, use a {@link CollectingDependencyNodeVisitor} on the root dependency node
+     * @deprecated As of 1.1, use a CollectingDependencyNodeVisitor on the root dependency node
      */
     public Collection getNodes()
     {

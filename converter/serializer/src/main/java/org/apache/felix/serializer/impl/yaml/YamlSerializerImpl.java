@@ -17,45 +17,38 @@
 package org.apache.felix.serializer.impl.yaml;
 
 import java.lang.reflect.Type;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-import org.osgi.service.converter.StandardConverter;
-import org.osgi.service.converter.Converter;
-import org.osgi.service.converter.TypeReference;
-import org.osgi.service.serializer.Serializer;
-import org.osgi.service.serializer.Deserializing;
-import org.osgi.service.serializer.Serializing;
+import org.apache.felix.serializer.Deserializing;
+import org.apache.felix.serializer.Parser;
+import org.apache.felix.serializer.Serializer;
+import org.apache.felix.serializer.Serializing;
+import org.apache.felix.serializer.Writer;
+import org.osgi.util.converter.Converter;
+import org.osgi.util.converter.Converters;
+import org.osgi.util.converter.TypeReference;
 
-public class YamlSerializerImpl implements Serializer {
-    private Map<String, Object> configuration = new ConcurrentHashMap<>();
-    private Converter converter = new StandardConverter();
-
-    @Override
-    public Serializer with(Converter c) {
-        converter = c;
-        return this;
-    }
+public class YamlSerializerImpl implements Serializer, Serializer.YamlSerializer {
+    private final Converter converter = Converters.standardConverter();
+    private final Parser parser = new DefaultYamlParser();
+    private final Writer writer = new DefaultYamlWriter(converter);
 
     @Override
     public <T> Deserializing<T> deserialize(Class<T> cls) {
-        return new YamlDeserializingImpl<T>(converter, cls);
+        return new YamlDeserializingImpl<T>(converter, parser, cls);
     }
 
     @Override
     public <T> Deserializing<T> deserialize(TypeReference<T> ref) {
-        // TODO Auto-generated method stub
-        return null;
+        return new YamlDeserializingImpl<T>(converter, parser, ref.getType());
     }
 
-    @Override
+    @Override @SuppressWarnings("rawtypes")
     public Deserializing<?> deserialize(Type type) {
-        // TODO Auto-generated method stub
-        return null;
+        return new YamlDeserializingImpl(converter, parser, type);
     }
 
     @Override
     public Serializing serialize(Object obj) {
-        return new YamlSerializingImpl(converter, configuration, obj);
+        return new YamlSerializingImpl(converter, writer, obj);
     }
 }

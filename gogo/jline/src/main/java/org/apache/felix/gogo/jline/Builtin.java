@@ -49,8 +49,9 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.felix.gogo.api.Job;
-import org.apache.felix.gogo.api.Process;
+import org.apache.felix.gogo.runtime.Reflective;
+import org.apache.felix.service.command.Job;
+import org.apache.felix.service.command.Process;
 import org.apache.felix.gogo.runtime.CommandSessionImpl;
 import org.apache.felix.service.command.CommandSession;
 import org.apache.felix.service.command.Converter;
@@ -81,22 +82,22 @@ public class Builtin {
 
     private static final String[] packages = {"java.lang", "java.io", "java.net", "java.util"};
 
-    private final static Set<String> KEYWORDS = new HashSet<String>(
-            Arrays.asList(new String[]{"abstract", "continue", "for", "new", "switch",
+    private final static Set<String> KEYWORDS = new HashSet<>(
+            Arrays.asList("abstract", "continue", "for", "new", "switch",
                     "assert", "default", "goto", "package", "synchronized", "boolean", "do",
                     "if", "private", "this", "break", "double", "implements", "protected",
                     "throw", "byte", "else", "import", "public", "throws", "case", "enum",
                     "instanceof", "return", "transient", "catch", "extends", "int", "short",
                     "try", "char", "final", "interface", "static", "void", "class",
                     "finally", "long", "strictfp", "volatile", "const", "float", "native",
-                    "super", "while"}));
+                    "super", "while"));
 
     public CharSequence format(CommandSession session) {
         return format(session, session.get("_"));    // last result
     }
 
     public CharSequence format(CommandSession session, Object arg) {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         CharSequence result = session.format(arg, Converter.INSPECT);
         process.out().println(result);
         return result;
@@ -121,7 +122,7 @@ public class Builtin {
         if (name instanceof Class<?>) {
             clazz = (Class<?>) name;
         } else {
-            clazz = loadClass(name.toString());
+            clazz = loadClass(session, name.toString());
         }
 
         for (Constructor<?> c : clazz.getConstructors()) {
@@ -161,20 +162,20 @@ public class Builtin {
                 + " to any of " + Arrays.asList(clazz.getConstructors()));
     }
 
-    private Class<?> loadClass(String name) throws ClassNotFoundException {
+    private Class<?> loadClass(CommandSession session, String name) throws ClassNotFoundException {
         if (!name.contains(".")) {
             for (String p : packages) {
                 String pkg = p + "." + name;
                 try {
-                    return Class.forName(pkg);
+                    return Class.forName(pkg, true, session.classLoader());
                 } catch (ClassNotFoundException e) {
                 }
             }
         }
-        return Class.forName(name);
+        return Class.forName(name, true, session.classLoader());
     }
 
-    public void set(CommandSession session, String[] argv) throws Exception {
+    public void set(CommandSession session, String[] argv) {
         final String[] usage = {
                 "set - show session variables",
                 "Usage: set [OPTIONS] [PREFIX]",
@@ -184,7 +185,7 @@ public class Builtin {
                 "  +x                       unset xtrace option",
                 "If PREFIX given, then only show variable(s) starting with PREFIX"};
 
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
 
         if (opt.isSet("help")) {
@@ -201,7 +202,7 @@ public class Builtin {
             session.put("echo", null);
         } else {
             boolean all = opt.isSet("all");
-            for (String key : new TreeSet<String>(Shell.getVariables(session))) {
+            for (String key : new TreeSet<>(Shell.getVariables(session))) {
                 if (!key.startsWith(prefix))
                     continue;
 
@@ -213,7 +214,7 @@ public class Builtin {
                 String value = null;
 
                 if (target != null) {
-                    Class<? extends Object> clazz = target.getClass();
+                    Class<?> clazz = target.getClass();
                     type = clazz.getSimpleName();
                     value = target.toString();
                 }
@@ -238,7 +239,7 @@ public class Builtin {
                 "  -l --list                return List<String>",
                 "  -? --help                show help"};
 
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
 
         if (opt.isSet("help")) {
@@ -268,7 +269,7 @@ public class Builtin {
         ArrayList<String> list = null;
 
         if (opt.isSet("list")) {
-            list = new ArrayList<String>();
+            list = new ArrayList<>();
         }
 
         boolean first = true;
@@ -309,7 +310,7 @@ public class Builtin {
                 "  -s --scope=NAME          list all commands in named scope",
                 "  -t --types               show full java type names"};
 
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
         List<String> args = opt.args();
 
@@ -333,7 +334,7 @@ public class Builtin {
         }
 
         if (optScope != null || (args.isEmpty() && all)) {
-            Set<String> snames = new TreeSet<String>();
+            Set<String> snames = new TreeSet<>();
 
             for (String sname : (getCommands(session))) {
                 if ((optScope == null) || sname.startsWith(optScope)) {
@@ -349,7 +350,7 @@ public class Builtin {
         }
 
         if (args.size() == 0) {
-            Map<String, Integer> scopes = new TreeMap<String, Integer>();
+            Map<String, Integer> scopes = new TreeMap<>();
 
             for (String sname : getCommands(session)) {
                 int colon = sname.indexOf(':');
@@ -374,7 +375,7 @@ public class Builtin {
         final String MAIN = "_main"; // FIXME: must match Reflective.java
 
         StringBuilder buf = new StringBuilder();
-        Set<String> cmds = new LinkedHashSet<String>();
+        Set<String> cmds = new LinkedHashSet<>();
 
         // get all commands
         if ((colon != -1) || (session.get(name) != null)) {
@@ -469,7 +470,7 @@ public class Builtin {
                 "Usage: jobs [OPTIONS]",
                 "  -? --help                show help",
         };
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
         if (opt.isSet("help")) {
             opt.usage(process.err());
@@ -481,7 +482,7 @@ public class Builtin {
             return;
         }
         List<Job> jobs = session.jobs();
-        Job current = Job.current();
+        Job current = Job.Utils.current();
         for (Job job : jobs) {
             if (job != current) {
                 process.out().println("[" + job.id() + "] " + job.status().toString().toLowerCase()
@@ -496,7 +497,7 @@ public class Builtin {
                 "Usage: fg [OPTIONS] [jobid]",
                 "  -? --help                show help",
         };
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
         if (opt.isSet("help")) {
             opt.usage(process.err());
@@ -509,7 +510,7 @@ public class Builtin {
         }
         List<Job> jobs = new ArrayList<>(session.jobs());
         Collections.reverse(jobs);
-        Job current = Job.current();
+        Job current = Job.Utils.current();
         if (argv.length == 0) {
             Job job = jobs.stream().filter(j -> j != current)
                     .findFirst().orElse(null);
@@ -537,7 +538,7 @@ public class Builtin {
                 "Usage: bg [OPTIONS] [jobid]",
                 "  -? --help                show help",
         };
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Options opt = Options.compile(usage).parse(argv);
         if (opt.isSet("help")) {
             opt.usage(process.err());
@@ -550,7 +551,7 @@ public class Builtin {
         }
         List<Job> jobs = new ArrayList<>(session.jobs());
         Collections.reverse(jobs);
-        Job current = Job.current();
+        Job current = Job.Utils.current();
         if (argv.length == 0) {
             Job job = jobs.stream().filter(j -> j != current)
                     .findFirst().orElse(null);
@@ -621,7 +622,7 @@ public class Builtin {
             target = method.invoke(target, (Object[]) null);
         }
 
-        ArrayList<Method> list = new ArrayList<Method>();
+        ArrayList<Method> list = new ArrayList<>();
         Class<?> tc = (target instanceof Class<?>) ? (Class<?>) target
                 : target.getClass();
         Method[] methods = tc.getMethods();
@@ -639,12 +640,12 @@ public class Builtin {
     }
 
     public void history(CommandSession session, String[] argv) throws IOException {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.history(Shell.getReader(session), process.out(), process.err(), argv);
     }
 
     public void complete(CommandSession session, String[] argv) {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.complete(Shell.getReader(session), process.out(), process.err(), Shell.getCompletions(session), argv);
     }
 
@@ -658,22 +659,22 @@ public class Builtin {
             }
             return true;
         };
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.widget(Shell.getReader(session), process.out(), process.err(), creator, argv);
     }
 
     public void keymap(CommandSession session, String[] argv) {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.keymap(Shell.getReader(session), process.out(), process.err(), argv);
     }
 
     public void setopt(CommandSession session, String[] argv) {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.setopt(Shell.getReader(session), process.out(), process.err(), argv);
     }
 
     public void unsetopt(CommandSession session, String[] argv) {
-        Process process = Process.current();
+        Process process = Process.Utils.current();
         Commands.unsetopt(Shell.getReader(session), process.out(), process.err(), argv);
     }
 
@@ -722,12 +723,7 @@ public class Builtin {
             type = "";
             suffix = "";
         }
-        String col = Posix.getColorMap(session, "LS").get(type);
-        if (col != null && !col.isEmpty()) {
-            return "\033[" + col + "m" + path.getFileName().toString() + "\033[m" + suffix;
-        } else {
-            return path.getFileName().toString() + suffix;
-        }
+        return Posix.applyStyle(path.getFileName().toString(), Posix.getLsColorMap(session), type) + suffix;
 
     }
 

@@ -30,12 +30,19 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.StringTokenizer;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.felix.framework.capabilityset.CapabilitySet;
 import org.apache.felix.framework.capabilityset.SimpleFilter;
 import org.apache.felix.framework.resolver.CandidateComparator;
 import org.apache.felix.framework.resolver.ResolveException;
+import org.apache.felix.framework.util.FelixConstants;
 import org.apache.felix.framework.util.ShrinkableCollection;
 import org.apache.felix.framework.util.Util;
 import org.apache.felix.framework.util.manifestparser.NativeLibrary;
@@ -70,6 +77,7 @@ class StatefulResolver
     private final Logger m_logger;
     private final Felix m_felix;
     private final ServiceRegistry m_registry;
+    private final Executor m_executor;
     private final ResolverImpl m_resolver;
     private boolean m_isResolving = false;
 
@@ -83,28 +91,20 @@ class StatefulResolver
     private final Map<String, List<BundleRevision>> m_singletons;
     // Selected singleton bundle revisions.
     private final Set<BundleRevision> m_selectedSingletons;
-    // Execution environment.
-    private final String m_fwkExecEnvStr;
-    // Parsed framework environments
-    private final Set<String> m_fwkExecEnvSet;
 
     StatefulResolver(Felix felix, ServiceRegistry registry)
     {
         m_felix = felix;
         m_registry = registry;
         m_logger = m_felix.getLogger();
-        m_resolver = new ResolverImpl(m_logger);
+        m_executor = getExecutor();
+        m_resolver = new ResolverImpl(m_logger, m_executor);
 
         m_revisions = new HashSet<BundleRevision>();
         m_fragments = new HashSet<BundleRevision>();
         m_capSets = new HashMap<String, CapabilitySet>();
         m_singletons = new HashMap<String, List<BundleRevision>>();
         m_selectedSingletons = new HashSet<BundleRevision>();
-
-        String fwkExecEnvStr =
-            (String) m_felix.getConfig().get(Constants.FRAMEWORK_EXECUTIONENVIRONMENT);
-        m_fwkExecEnvStr = (fwkExecEnvStr != null) ? fwkExecEnvStr.trim() : null;
-        m_fwkExecEnvSet = parseExecutionEnvironments(fwkExecEnvStr);
 
         List<String> indices = new ArrayList<String>();
         indices.add(BundleRevision.BUNDLE_NAMESPACE);
@@ -119,11 +119,58 @@ class StatefulResolver
         m_capSets.put(BundleRevision.HOST_NAMESPACE,  new CapabilitySet(indices, true));
     }
 
+    private Executor getExecutor()
+    {
+        String str = m_felix.getProperty(FelixConstants.RESOLVER_PARALLELISM);
+        int parallelism = Runtime.getRuntime().availableProcessors();
+        if (str != null)
+        {
+            try
+            {
+                parallelism = Integer.parseInt(str);
+            }
+            catch (NumberFormatException e)
+            {
+                // Ignore
+            }
+        }
+        if (parallelism <= 1)
+        {
+            return new Executor()
+            {
+                public void execute(Runnable command)
+                {
+                    command.run();
+                }
+            };
+        }
+        else
+        {
+            ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                    parallelism, parallelism,
+                    60, TimeUnit.SECONDS,
+                    new LinkedBlockingQueue<Runnable>(),
+                    new ThreadFactory()
+                    {
+                        final AtomicInteger counter = new AtomicInteger();
+                        @Override
+                        public Thread newThread(Runnable r)
+                        {
+                            Thread thread = new Thread(r, "FelixResolver-" + counter.incrementAndGet());
+                            thread.setDaemon(true);
+                            return thread;
+                        }
+                    });
+            executor.allowCoreThreadTimeOut(true);
+            return executor;
+        }
+    }
+
     void start()
     {
         m_registry.registerService(m_felix,
                 new String[] { Resolver.class.getName() },
-                m_resolver,
+                new ResolverImpl(m_logger, 1),
                 null);
     }
 
@@ -531,26 +578,10 @@ class StatefulResolver
                                 BundleRevision.PACKAGE_NAMESPACE,
                                 Collections.EMPTY_MAP,
                                 attrs);
-                        List<BundleCapability> candidates = findProvidersInternal(record, req, false, true);
+                        final List<BundleCapability> candidates = findProvidersInternal(record, req, false, true);
 
                         // Try to find a dynamic requirement that matches the capabilities.
-                        BundleRequirementImpl dynReq = null;
-                        for (int dynIdx = 0;
-                             (candidates.size() > 0) && (dynReq == null) && (dynIdx < dynamics.size());
-                             dynIdx++)
-                        {
-                            for (Iterator<BundleCapability> itCand = candidates.iterator();
-                                 (dynReq == null) && itCand.hasNext(); )
-                            {
-                                Capability cap = itCand.next();
-                                if (CapabilitySet.matches(
-                                        cap,
-                                        ((BundleRequirementImpl) dynamics.get(dynIdx)).getFilter()))
-                                {
-                                    dynReq = (BundleRequirementImpl) dynamics.get(dynIdx);
-                                }
-                            }
-                        }
+                        final BundleRequirementImpl dynReq = findDynamicRequirement(dynamics, candidates);
 
                         // If we found a matching dynamic requirement, then filter out
                         // any candidates that do not match it.
@@ -561,7 +592,7 @@ class StatefulResolver
                             {
                                 Capability cap = itCand.next();
                                 if (!CapabilitySet.matches(
-                                        cap, dynReq.getFilter()))
+                                    cap, dynReq.getFilter()))
                                 {
                                     itCand.remove();
                                 }
@@ -572,15 +603,24 @@ class StatefulResolver
                             candidates.clear();
                         }
 
-                        wireMap = m_resolver.resolve(
+                        Map<Resource, Wiring> wirings = getWirings();
+
+                        wireMap = dynReq != null && wirings.containsKey(revision) ? m_resolver.resolveDynamic(
                             new ResolveContextImpl(
                                 this,
-                                getWirings(),
+                                wirings,
                                 record,
                                 Collections.<BundleRevision>emptyList(),
                                 Collections.<BundleRevision>emptyList(),
-                                getFragments()),
-                            revision, dynReq, new ArrayList<Capability>(candidates));
+                                getFragments())
+                            {
+                                @Override
+                                public List<Capability> findProviders(Requirement br)
+                                {
+                                    return (List) (br == dynReq ? candidates : super.findProviders(br));
+                                }
+                            },
+                            revision.getWiring(), dynReq) : Collections.<Resource, List<Wire>>emptyMap();
                     }
                     catch (ResolutionException ex)
                     {
@@ -652,6 +692,24 @@ class StatefulResolver
         }
 
         return provider;
+    }
+
+    private BundleRequirementImpl findDynamicRequirement(List<BundleRequirement> dynamics, List<BundleCapability> candidates)
+    {
+        for (int dynIdx = 0; (candidates.size() > 0)  && (dynIdx < dynamics.size()); dynIdx++)
+        {
+            for (Iterator<BundleCapability> itCand = candidates.iterator(); itCand.hasNext(); )
+            {
+                Capability cap = itCand.next();
+                if (CapabilitySet.matches(
+                    cap,
+                    ((BundleRequirementImpl) dynamics.get(dynIdx)).getFilter()))
+                {
+                    return (BundleRequirementImpl) dynamics.get(dynIdx);
+                }
+            }
+        }
+        return null;
     }
 
     private ResolverHookRecord prepareResolverHooks(
@@ -973,10 +1031,8 @@ class StatefulResolver
 
                 if (Util.isFragment(revision))
                 {
-                    for (Iterator<Wire> itWires = wires.iterator();
-                        itWires.hasNext(); )
+                    for (Wire w : wires)
                     {
-                        Wire w = itWires.next();
                         List<BundleRevision> fragments = hosts.get(w.getProvider());
                         if (fragments == null)
                         {
@@ -1590,41 +1646,6 @@ class StatefulResolver
         return fragments;
     }
 
-    void checkNativeLibraries(BundleRevision revision) throws ResolveException
-    {
-        // Next, try to resolve any native code, since the revision is
-        // not resolvable if its native code cannot be loaded.
-        List<NativeLibrary> libs = ((BundleRevisionImpl) revision).getDeclaredNativeLibraries();
-        if (libs != null)
-        {
-            String msg = null;
-            // Verify that all native libraries exist in advance; this will
-            // throw an exception if the native library does not exist.
-            for (int libIdx = 0; (msg == null) && (libIdx < libs.size()); libIdx++)
-            {
-                String entryName = libs.get(libIdx).getEntryName();
-                if (entryName != null)
-                {
-                    if (!((BundleRevisionImpl) revision).getContent().hasEntry(entryName))
-                    {
-                        msg = "Native library does not exist: " + entryName;
-                    }
-                }
-            }
-            // If we have a zero-length native library array, then
-            // this means no native library class could be selected
-            // so we should fail to resolve.
-            if (libs.isEmpty())
-            {
-                msg = "No matching native libraries found.";
-            }
-            if (msg != null)
-            {
-                throw new ResolveException(msg, revision, null);
-            }
-        }
-    }
-
     private synchronized Set<BundleRevision> getUnresolvedRevisions()
     {
         Set<BundleRevision> unresolved = new HashSet<BundleRevision>();
@@ -1650,27 +1671,6 @@ class StatefulResolver
             }
         }
         return wirings;
-    }
-
-    /**
-     * Updates the framework wide execution environment string and a cached Set of
-     * execution environment tokens from the comma delimited list specified by the
-     * system variable 'org.osgi.framework.executionenvironment'.
-     * @param fwkExecEnvStr Comma delimited string of provided execution environments
-     * @return the parsed set of execution environments
-    **/
-    private static Set<String> parseExecutionEnvironments(String fwkExecEnvStr)
-    {
-        Set<String> newSet = new HashSet<String>();
-        if (fwkExecEnvStr != null)
-        {
-            StringTokenizer tokens = new StringTokenizer(fwkExecEnvStr, ",");
-            while (tokens.hasMoreTokens())
-            {
-                newSet.add(tokens.nextToken().trim());
-            }
-        }
-        return newSet;
     }
 
     private static void addToSingletonMap(
@@ -1723,7 +1723,7 @@ class StatefulResolver
                 {
                     return new Iterator<ResolverHook>()
                     {
-                        private Iterator<Map.Entry<ServiceReference<ResolverHookFactory>, ResolverHook>> it =
+                        private final Iterator<Map.Entry<ServiceReference<ResolverHookFactory>, ResolverHook>> it =
                             m_resolveHookMap.entrySet().iterator();
                         private Entry<ServiceReference<ResolverHookFactory>, ResolverHook> next = null;
 

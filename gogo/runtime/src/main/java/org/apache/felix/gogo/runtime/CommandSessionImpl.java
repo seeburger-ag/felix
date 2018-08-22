@@ -49,12 +49,11 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.stream.Collectors;
 
-import org.apache.felix.gogo.api.Job;
-import org.apache.felix.gogo.api.Job.Status;
-import org.apache.felix.gogo.api.JobListener;
-import org.apache.felix.gogo.api.Process;
+import org.apache.felix.service.command.Job;
+import org.apache.felix.service.command.Job.Status;
+import org.apache.felix.service.command.JobListener;
+import org.apache.felix.service.command.Process;
 import org.apache.felix.gogo.runtime.Pipe.Result;
 import org.apache.felix.service.command.CommandProcessor;
 import org.apache.felix.service.command.CommandSession;
@@ -87,11 +86,12 @@ public class CommandSessionImpl implements CommandSession, Converter
     private final ExecutorService executor;
 
     private Path currentDir;
+    private ClassLoader classLoader;
 
     protected CommandSessionImpl(CommandProcessorImpl shell, CommandSessionImpl parent)
     {
         this.currentDir = parent.currentDir;
-        this.executor = Executors.newCachedThreadPool();
+        this.executor = Executors.newCachedThreadPool(ThreadUtils.namedThreadFactory("session"));
         this.processor = shell;
         this.channels = parent.channels;
         this.in = parent.in;
@@ -140,6 +140,16 @@ public class CommandSessionImpl implements CommandSession, Converter
     public void currentDir(Path path)
     {
         currentDir = path;
+    }
+
+    public ClassLoader classLoader()
+    {
+        return classLoader != null ? classLoader : getClass().getClassLoader();
+    }
+
+    public void classLoader(ClassLoader classLoader)
+    {
+        this.classLoader = classLoader;
     }
 
     public void close()
@@ -447,13 +457,9 @@ public class CommandSessionImpl implements CommandSession, Converter
                     f.format(COLUMN, name, format(value, Converter.LINE, this));
                 }
             }
-            catch (IllegalAccessException e)
-            {
-                // Ignore
-            }
             catch (Exception e)
             {
-                e.printStackTrace();
+                // Ignore
             }
         }
         if (found)
@@ -473,6 +479,17 @@ public class CommandSessionImpl implements CommandSession, Converter
 
     public Object doConvert(Class<?> desiredType, Object in)
     {
+        if (desiredType == Class.class)
+        {
+            try
+            {
+                return Class.forName(in.toString(), true, classLoader());
+            }
+            catch (ClassNotFoundException e)
+            {
+                return null;
+            }
+        }
         return processor.doConvert(desiredType, in);
     }
 
@@ -493,6 +510,16 @@ public class CommandSessionImpl implements CommandSession, Converter
         return processor.expr(this, expr);
     }
 
+    public Object invoke(Object target, String name, List<Object> args) throws Exception
+    {
+        return processor.invoke(this, target, name, args);
+    }
+
+    public Path redirect(Path path, int mode)
+    {
+        return processor.redirect(this, path, mode);
+    }
+
     @Override
     public List<Job> jobs()
     {
@@ -504,7 +531,7 @@ public class CommandSessionImpl implements CommandSession, Converter
 
     public static JobImpl currentJob()
     {
-        return (JobImpl) Job.current();
+        return (JobImpl) Job.Utils.current();
     }
 
     @Override
@@ -515,10 +542,12 @@ public class CommandSessionImpl implements CommandSession, Converter
         {
             jobs = new ArrayList<>(this.jobs);
         }
-        return jobs.stream()
-                    .filter(j -> j.parent == null && j.status() == Status.Foreground)
-                    .findFirst()
-                    .orElse(null);
+        for (JobImpl j : jobs) {
+            if (j.parent == null && j.status() == Status.Foreground) {
+                return j;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -536,39 +565,43 @@ public class CommandSessionImpl implements CommandSession, Converter
         {
             int id = 1;
 
-            synchronized (jobs) {
-                boolean found;
-                do
+            boolean found;
+            do
+            {
+                found = false;
+                for (Job job : jobs)
                 {
-                    found = false;
-                    for (Job job : jobs)
+                    if (job.id() == id)
                     {
-                        if (job.id() == id)
-                        {
-                            found = true;
-                            id++;
-                            break;
-                        }
+                        found = true;
+                        id++;
+                        break;
                     }
                 }
-                while (found);
             }
+            while (found);
+
             JobImpl cur = currentJob();
             JobImpl job = new JobImpl(id, cur, command);
             if (cur == null)
             {
                 jobs.add(job);
             }
+            else
+            {
+                cur.add(job);
+            }
             return job;
         }
     }
 
-    class JobImpl implements Job
+    class JobImpl implements Job, Runnable
     {
         private final int id;
         private final JobImpl parent;
         private final CharSequence command;
         private final List<Pipe> pipes = new ArrayList<>();
+        private final List<Job> children = new ArrayList<>();
         private Status status = Status.Created;
         private Future<?> future;
         private Result result;
@@ -651,9 +684,18 @@ public class CommandSessionImpl implements CommandSession, Converter
         public void interrupt()
         {
             Future future;
+            List<Job> children;
             synchronized (this)
             {
                 future = this.future;
+            }
+            synchronized (this.children)
+            {
+                children = new ArrayList<>(this.children);
+            }
+            for (Job job : children)
+            {
+                job.interrupt();
             }
             if (future != null)
             {
@@ -717,7 +759,17 @@ public class CommandSessionImpl implements CommandSession, Converter
             return parent;
         }
 
-        @Override
+        /**
+         * Start the job.
+         * If the job is started in foreground,
+         * waits for the job to finish or to be
+         * suspended or moved to background.
+         *
+         * @param status the desired job status
+         * @return <code>null</code> if the job
+         *   has been suspended or moved to background,
+         *
+         */
         public synchronized Result start(Status status) throws InterruptedException
         {
             if (status == Status.Created || status == Status.Done)
@@ -740,7 +792,7 @@ public class CommandSessionImpl implements CommandSession, Converter
                     foreground();
                     break;
             }
-            future = executor.submit(this::call);
+            future = executor.submit(this);
             while (this.status == Status.Foreground)
             {
                 JobImpl.this.wait();
@@ -759,7 +811,7 @@ public class CommandSessionImpl implements CommandSession, Converter
             return CommandSessionImpl.this;
         }
 
-        private Void call() throws Exception
+        public void run()
         {
             Thread thread = Thread.currentThread();
             String name = thread.getName();
@@ -767,7 +819,7 @@ public class CommandSessionImpl implements CommandSession, Converter
             {
                 thread.setName("job controller " + id);
 
-                List<Callable<Result>> wrapped = pipes.stream().collect(Collectors.toList());
+                List<Callable<Result>> wrapped = new ArrayList<>(pipes);
                 List<Future<Result>> results = executor.invokeAll(wrapped);
 
                 // Get pipe exceptions
@@ -798,14 +850,28 @@ public class CommandSessionImpl implements CommandSession, Converter
 
                 result = results.get(results.size() - 1).get();
             }
+            catch (Exception e)
+            {
+                result = new Result(e);
+            }
+            catch (Throwable t)
+            {
+                result = new Result(new ExecutionException(t));
+            }
             finally
             {
                 done();
                 thread.setName(name);
             }
-            return null;
         }
 
+        public void add(Job child)
+        {
+            synchronized (children)
+            {
+                children.add(child);
+            }
+        }
     }
 
 }

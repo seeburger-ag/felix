@@ -19,8 +19,8 @@ package org.apache.felix.http.base.internal.dispatch;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNull;
 import javax.servlet.DispatcherType;
 import javax.servlet.FilterChain;
 import javax.servlet.RequestDispatcher;
@@ -44,10 +44,10 @@ final class ServletResponseWrapper extends HttpServletResponseWrapper
 
     private final String servletName;
 
-    public ServletResponseWrapper(@Nonnull final HttpServletRequest req,
-            @Nonnull final HttpServletResponse res,
-            @CheckForNull final String servletName,
-            @CheckForNull final PerContextHandlerRegistry errorRegistry)
+    public ServletResponseWrapper(@NotNull final HttpServletRequest req,
+            @NotNull final HttpServletResponse res,
+            @Nullable final String servletName,
+            @Nullable final PerContextHandlerRegistry errorRegistry)
     {
         super(res);
         this.request = req;
@@ -74,13 +74,13 @@ final class ServletResponseWrapper extends HttpServletResponseWrapper
         {
             // If we are allowed to have a body
             if (code != SC_NO_CONTENT &&
-                code != SC_NOT_MODIFIED &&
-                code != SC_PARTIAL_CONTENT &&
-                code >= SC_OK)
+                    code != SC_NOT_MODIFIED &&
+                    code != SC_PARTIAL_CONTENT &&
+                    code >= SC_OK)
             {
                 final Throwable exception = (Throwable)request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
                 final ServletHandler errorResolution = (errorRegistry == null ? null :
-                        errorRegistry.getErrorHandler(code, exception));
+                    errorRegistry.getErrorHandler(code, exception));
 
                 if ( errorResolution != null )
                 {
@@ -105,8 +105,13 @@ final class ServletResponseWrapper extends HttpServletResponseWrapper
 
                         final FilterHandler[] filterHandlers = errorRegistry.getFilterHandlers(errorResolution, DispatcherType.ERROR, request.getRequestURI());
 
-                        // TODO - is async = false correct?
-                        final ServletRequestWrapper reqWrapper = new ServletRequestWrapper(request, errorResolution.getContext(), requestInfo, null, errorResolution.getContextServiceId(), false);
+                        final ServletRequestWrapper reqWrapper = new ServletRequestWrapper(request,
+                                errorResolution.getContext(),
+                                requestInfo,
+                                null,
+                                false,
+                                null,
+                                null);
                         final FilterChain filterChain = new InvocationChain(errorResolution, filterHandlers);
                         filterChain.doFilter(reqWrapper, this);
 

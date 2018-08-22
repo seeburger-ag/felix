@@ -91,8 +91,8 @@ public class DependencyBuilder
     private Dependency createServiceDependency(Bundle b, DependencyManager dm)
         throws ClassNotFoundException
     {
-        String service = m_metaData.getString(Params.service);
-        Class<?> serviceClass = b.loadClass(service);
+        String service = m_metaData.getString(Params.service, null);
+        Class<?> serviceClass = service != null ? b.loadClass(service) : null;
         String serviceFilter = m_metaData.getString(Params.filter, null);
         String defaultServiceImpl = m_metaData.getString(Params.defaultImpl, null);
         Class<?> defaultServiceImplClass =
@@ -101,20 +101,22 @@ public class DependencyBuilder
         long timeout = m_metaData.getLong(Params.timeout, -1L);
         String changed = timeout != -1 ? null : m_metaData.getString(Params.changed, null);
         String removed = timeout != -1 ? null : m_metaData.getString(Params.removed, null);
+        String swap = m_metaData.getString(Params.swap, null);
         String autoConfigField = m_metaData.getString(Params.autoConfig, null);
         boolean required = "true".equals(m_metaData.getString(Params.required, "true"));
         boolean propagate = "true".equals(m_metaData.getString(Params.propagate, "false"));
+        boolean dereference = "true".equals(m_metaData.getString(Params.dereference, "true"));
 
         Dependency dp = createServiceDependency(dm, serviceClass,
             serviceFilter, defaultServiceImplClass, added, changed,
-            removed, autoConfigField, timeout, required, propagate);
+            removed, swap, autoConfigField, timeout, required, propagate, dereference);
         return dp;
     }
 
     private Dependency createServiceDependency(DependencyManager dm, Class<?> serviceClass, 
         String serviceFilter, Class<?> defaultServiceImplClass, String added,
-        String changed, String removed, String autoConfigField, long timeout, boolean required,
-        boolean propagate)
+        String changed, String removed, String swap, String autoConfigField, long timeout, boolean required,
+        boolean propagate, boolean dereference)
     {
         ServiceDependency sd = timeout != -1 ? dm.createTemporalServiceDependency(timeout)
             : dm.createServiceDependency();
@@ -123,7 +125,7 @@ public class DependencyBuilder
         {
             sd.setDefaultImplementation(defaultServiceImplClass);
         }
-        sd.setCallbacks(added, changed, removed);
+        sd.setCallbacks(added, changed, removed, swap);
         if (autoConfigField != null)
         {
             sd.setAutoConfig(autoConfigField);
@@ -134,6 +136,7 @@ public class DependencyBuilder
         }
         
         sd.setPropagate(propagate);
+        sd.setDereference(dereference);
         return sd;
     }
 

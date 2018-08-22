@@ -20,7 +20,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
 
@@ -36,7 +36,7 @@ public final class SharedHttpServiceImpl
 {
     private final HandlerRegistry handlerRegistry;
 
-    private final Map<String, ServletHandler> aliasMap = new HashMap<String, ServletHandler>();
+    private final Map<String, ServletHandler> aliasMap = new HashMap<>();
 
     public SharedHttpServiceImpl(final HandlerRegistry handlerRegistry)
     {
@@ -51,7 +51,7 @@ public final class SharedHttpServiceImpl
     /**
      * Register a filter
      */
-    public boolean registerFilter(@Nonnull final FilterHandler handler)
+    public boolean registerFilter(@NotNull final FilterHandler handler)
     {
         this.handlerRegistry.getRegistry(handler.getContextServiceId()).registerFilter(handler);
         return true;
@@ -60,10 +60,10 @@ public final class SharedHttpServiceImpl
     /**
      * Register a servlet
      */
-    public void registerServlet(@Nonnull final String alias,
-            @Nonnull final ExtServletContext httpContext,
-            @Nonnull final Servlet servlet,
-            @Nonnull final ServletInfo servletInfo) throws ServletException, NamespaceException
+    public void registerServlet(@NotNull final String alias,
+            @NotNull final ExtServletContext httpContext,
+            @NotNull final Servlet servlet,
+            @NotNull final ServletInfo servletInfo) throws ServletException, NamespaceException
     {
         final ServletHandler handler = new HttpServiceServletHandler(httpContext, servletInfo, servlet);
 
@@ -98,7 +98,7 @@ public final class SharedHttpServiceImpl
         }
     }
 
-    public void unregisterServlet(final Servlet servlet, final boolean destroy)
+    public void unregisterServlet(final Servlet servlet)
     {
         if (servlet != null)
         {
@@ -110,7 +110,7 @@ public final class SharedHttpServiceImpl
                     final Map.Entry<String, ServletHandler> entry = i.next();
                     if (entry.getValue().getServlet() == servlet)
                     {
-                        this.handlerRegistry.getRegistry(entry.getValue().getContextServiceId()).unregisterServlet(entry.getValue().getServletInfo(), destroy);
+                        this.handlerRegistry.getRegistry(entry.getValue().getContextServiceId()).unregisterServlet(entry.getValue().getServletInfo(), false);
 
                         i.remove();
                         break;
@@ -121,15 +121,7 @@ public final class SharedHttpServiceImpl
         }
     }
 
-    public void unregisterFilter(final FilterHandler handler, final boolean destroy)
-    {
-        if (handler != null)
-        {
-            this.handlerRegistry.getRegistry(handler.getContextServiceId()).unregisterFilter(handler.getFilterInfo(), destroy);
-        }
-    }
-
-	public HandlerRegistry getHandlerRegistry() 
+	public HandlerRegistry getHandlerRegistry()
 	{
 		return this.handlerRegistry;
 	}

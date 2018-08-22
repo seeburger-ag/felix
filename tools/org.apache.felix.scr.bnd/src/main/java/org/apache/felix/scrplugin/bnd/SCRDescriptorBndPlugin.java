@@ -299,11 +299,15 @@ public class SCRDescriptorBndPlugin implements AnalyzerPlugin, Plugin {
 	}
 
 	private URL[] getClassPath(Analyzer a) throws Exception {
-		final ArrayList<URL> path = new ArrayList<URL>();
+		final Set<URL> path = new HashSet<URL>();
 		for (final Jar j : a.getClasspath()) {
 			path.add(j.getSource().toURI().toURL());
 		}
-		log.info("Using claspath: " + path);
+		// always add the target url (containing all compiled classes) because it it not necessarily part of the analyzer classpath
+		if (a.getTarget() != null && a.getTarget().getSource() != null) {
+		    path.add(a.getTarget().getSource().toURI().toURL());
+		}
+		log.info("Using classpath: " + path);
 		return path.toArray(new URL[path.size()]);
 	}
 

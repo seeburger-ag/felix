@@ -22,6 +22,7 @@ import org.apache.felix.dm.DependencyManager;
 import org.apache.felix.dm.annotation.api.Component;
 import org.apache.felix.dm.annotation.api.Inject;
 import org.apache.felix.dm.annotation.api.ServiceDependency;
+import org.apache.felix.dm.annotation.api.ServiceDependency.Any;
 import org.apache.felix.dm.annotation.api.Start;
 import org.apache.felix.dm.annotation.api.Stop;
 import org.apache.felix.dm.itest.util.Ensure;
@@ -88,10 +89,9 @@ public class FELIX5337 implements FrameworkListener {
 	/**
 	 * Track all available services using annotation.
 	 */
-	@ServiceDependency(filter = "(objectClass=*)")
+	@ServiceDependency(service=Any.class)
 	void bindService(Object service) {
-		m_services++; // thread safe, in DM, service callbacks are always thread
-						// safe.
+		m_services++; // thread safe, in DM, service callbacks are always thread safe.
 	}
 
 	@Start
@@ -106,7 +106,7 @@ public class FELIX5337 implements FrameworkListener {
 		if (m_bctx.getBundle(0).getState() != Bundle.ACTIVE) {
 			m_bctx.addFrameworkListener(this);
 		} else {
-			frameworkEvent(new FrameworkEvent(FrameworkEvent.STARTED, m_bctx.getBundle()));
+			frameworkEvent(new FrameworkEvent(FrameworkEvent.STARTED, m_bctx.getBundle(), null));
 		}
 	}
 
@@ -120,9 +120,18 @@ public class FELIX5337 implements FrameworkListener {
 	public void frameworkEvent(FrameworkEvent event) {
 		switch (event.getType()) {
 		case FrameworkEvent.STARTED:
-			// Make sure all services found using DM api matches the number of services found using annotations.
-			Assert.assertEquals(m_services, m_servicesAPI);
-			m_sequencer.step(2);
+		    // some services may be registered asynchronously. so, wait 2 seconds to be sure all services are registered (it's dirty, but how to avoid this ?)
+		    new Thread(() -> {
+		        try
+                {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e)
+                {
+                }
+		        // Make sure all services found using DM api matches the number of services found using annotations.
+		        Assert.assertEquals(m_services, m_servicesAPI);
+		        m_sequencer.step(2);
+		    }).start();
 			break;
 		}
 	}

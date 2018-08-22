@@ -18,12 +18,13 @@
  */
 package org.apache.felix.gogo.runtime;
 
-import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
+import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.channels.Channel;
 import java.nio.channels.Channels;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.WritableByteChannel;
+import java.nio.channels.spi.AbstractInterruptibleChannel;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.felix.gogo.api.Job.Status;
+import org.apache.felix.service.command.Job.Status;
 import org.apache.felix.gogo.runtime.Parser.Array;
 import org.apache.felix.gogo.runtime.Parser.Executable;
 import org.apache.felix.gogo.runtime.Parser.Operator;
@@ -150,6 +151,17 @@ public class Closure implements Function, Evaluate
 
     public Object execute(CommandSession x, List<Object> values, Channel capturingOutput) throws Exception
     {
+        if (x != null && x != session)
+        {
+            if (x instanceof CommandSessionImpl)
+            {
+                return new Closure((CommandSessionImpl) x, null, program).execute(x, values, capturingOutput);
+            }
+            else
+            {
+                throw new IllegalStateException("The current session is not a Gogo session");
+            }
+        }
         try
         {
             location.remove();
@@ -217,7 +229,11 @@ public class Closure implements Function, Evaluate
                 streams = Pipe.getCurrentPipe().streams.clone();
             } else {
                 streams = new Channel[10];
-                System.arraycopy(session.channels, 0, streams, 0, 3);
+                streams[0] = session.channels[0];
+                streams[1] = new WritableByteChannelImpl((WritableByteChannel) session.channels[1]);
+                streams[2] = session.channels[1] == session.channels[2]
+                                ? streams[1]
+                                : new WritableByteChannelImpl((WritableByteChannel) session.channels[2]);
             }
             if (capturingOutput != null) {
                 streams[1] = capturingOutput;
@@ -237,9 +253,11 @@ public class Closure implements Function, Evaluate
                     Operator op = i < exec.size() - 1 ? (Operator) exec.get(++i) : null;
                     Channel[] nstreams;
                     boolean[] ntoclose;
+                    boolean endOfPipe;
                     if (i == exec.size() - 1) {
                         nstreams = streams;
                         ntoclose = toclose;
+                        endOfPipe = true;
                     } else if (Token.eq("|", op)) {
                         PipedInputStream pis = new PipedInputStream();
                         PipedOutputStream pos = new PipedOutputStream(pis);
@@ -249,6 +267,7 @@ public class Closure implements Function, Evaluate
                         ntoclose[1] = true;
                         streams[0] = Channels.newChannel(pis);
                         toclose[0] = true;
+                        endOfPipe = false;
                     } else if (Token.eq("|&", op)) {
                         PipedInputStream pis = new PipedInputStream();
                         PipedOutputStream pos = new PipedOutputStream(pis);
@@ -258,15 +277,16 @@ public class Closure implements Function, Evaluate
                         ntoclose[1] = ntoclose[2] = true;
                         streams[0] = Channels.newChannel(pis);
                         toclose[0] = true;
+                        endOfPipe = false;
                     } else {
                         throw new IllegalStateException("Unrecognized pipe operator: '" + op + "'");
                     }
-                    Pipe pipe = new Pipe(this, job, ex, nstreams, ntoclose);
+                    Pipe pipe = new Pipe(this, job, ex, nstreams, ntoclose, endOfPipe);
                     job.addPipe(pipe);
                 }
             } else {
                 job = session().createJob(executable);
-                Pipe pipe = new Pipe(this, job, (Statement) executable, streams, toclose);
+                Pipe pipe = new Pipe(this, job, (Statement) executable, streams, toclose, true);
                 job.addPipe(pipe);
             }
 
@@ -289,7 +309,31 @@ public class Closure implements Function, Evaluate
         return last == null ? null : last.result;
     }
 
-    private Object eval(Object v)
+    private static class WritableByteChannelImpl extends AbstractInterruptibleChannel
+            implements WritableByteChannel {
+        private final WritableByteChannel out;
+
+        WritableByteChannelImpl(WritableByteChannel out) {
+            this.out = out;
+        }
+
+        public int write(ByteBuffer src) throws IOException {
+            if (!isOpen()) {
+                throw new ClosedChannelException();
+            }
+            begin();
+            try {
+                return out.write(src);
+            } finally {
+                end(true);
+            }
+       }
+
+        protected void implCloseChannel() {
+        }
+    }
+
+    static Object eval(Object v)
     {
         String s = v.toString();
         if ("null".equals(s))
@@ -322,6 +366,11 @@ public class Closure implements Function, Evaluate
 
     public Object eval(final Token t) throws Exception
     {
+        return eval(t, true);
+    }
+
+    public Object eval(final Token t, boolean convertNumeric) throws Exception
+    {
         if (t instanceof Parser.Closure)
         {
             return new Closure(session, this, ((Parser.Closure) t).program());
@@ -350,7 +399,10 @@ public class Closure implements Function, Evaluate
             Object v = Expander.expand(t, this);
             if (t == v)
             {
-                v = eval(v);
+                if (convertNumeric)
+                {
+                    v = eval(v);
+                }
             }
             return v;
         }
@@ -408,7 +460,7 @@ public class Closure implements Function, Evaluate
 
         for (Token t : tokens)
         {
-            Object v = eval(t);
+            Object v = eval(t, values.isEmpty());
 
 //            if ((Token.Type.EXECUTION == t.type) && (tokens.size() == 1)) {
 //                return v;
@@ -497,8 +549,7 @@ public class Closure implements Function, Evaluate
         }
     }
 
-    private boolean bareword(Token t, Object v) throws Exception
-    {
+    private boolean bareword(Token t, Object v) {
         return v instanceof CharSequence && Token.eq(t, (CharSequence) v);
     }
 
@@ -570,8 +621,7 @@ public class Closure implements Function, Evaluate
             {
                 if (".".equals(arg))
                 {
-                    target = Reflective.invoke(session, target,
-                        args.remove(0).toString(), args);
+                    target = invoke(target, args.remove(0).toString(), args);
                     args.clear();
                 }
                 else
@@ -585,7 +635,7 @@ public class Closure implements Function, Evaluate
                 return target;
             }
 
-            return Reflective.invoke(session, target, args.remove(0).toString(), args);
+            return invoke(target, args.remove(0).toString(), args);
         }
         else if (cmd.getClass().isArray() && values.size() == 1)
         {
@@ -595,8 +645,13 @@ public class Closure implements Function, Evaluate
         }
         else
         {
-            return Reflective.invoke(session, cmd, values.remove(0).toString(), values);
+            return invoke(cmd, values.remove(0).toString(), values);
         }
+    }
+
+    private Object invoke(Object target, String name, List<Object> args) throws Exception
+    {
+        return session.invoke(target, name, args);
     }
 
     private Object assignment(String name, Object value)
@@ -624,6 +679,10 @@ public class Closure implements Function, Evaluate
                 if (oval.getClass().isArray())
                 {
                     Collections.addAll(olist, (Object[]) oval);
+                }
+                else if (oval instanceof ArgList)
+                {
+                    olist.addAll((ArgList) oval);
                 }
                 else
                 {
@@ -689,7 +748,24 @@ public class Closure implements Function, Evaluate
 
     @Override
     public Path currentDir() {
-        return session().currentDir();
+        return isSet(CommandSession.OPTION_NO_GLOB, false) ? null : session().currentDir();
+    }
+
+    @Override
+    public ClassLoader classLoader() {
+        return session.classLoader();
+    }
+
+    protected boolean isSet(String name, boolean def) {
+        Object v = session.get(name);
+        if (v instanceof Boolean) {
+            return (Boolean) v;
+        } else if (v != null) {
+            String s = v.toString();
+            return s.isEmpty() || s.equalsIgnoreCase("on")
+                    || s.equalsIgnoreCase("1") || s.equalsIgnoreCase("true");
+        }
+        return def;
     }
 
     @Override

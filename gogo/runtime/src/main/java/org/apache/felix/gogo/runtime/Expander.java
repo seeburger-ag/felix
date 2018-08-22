@@ -19,20 +19,21 @@
 package org.apache.felix.gogo.runtime;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.PathMatcher;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -40,8 +41,6 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @SuppressWarnings("fallthrough")
 public class Expander extends BaseTokenizer
@@ -119,14 +118,21 @@ public class Expander extends BaseTokenizer
         {
             return expanded;
         }
-        Stream<Object> stream = expanded instanceof Collection
-                ? asCollection(expanded).stream()
-                : Stream.of(expanded);
-        List<Object> args = stream
-                .flatMap(uncheck(o -> o instanceof CharSequence ? expandBraces((CharSequence) o).stream() : Stream.of(o)))
-                .flatMap(uncheck(o -> generateFileNames && o instanceof CharSequence ? generateFileNames((CharSequence) o).stream() : Stream.of(o)))
-                .map(o -> unquote && o instanceof CharSequence ? unquote((CharSequence) o) : o)
-                .collect(Collectors.toList());
+        List<Object> args = new ArrayList<>();
+        for (Object o1 : toCollection(expanded)) {
+            for (Object o2 : o1 instanceof CharSequence
+                                ? expandBraces((CharSequence) o1)
+                                : Collections.singleton(o1)) {
+                for (Object o3 : generateFileNames && o2 instanceof CharSequence
+                                    ? generateFileNames(((CharSequence) o2))
+                                    : Collections.singleton(o2)) {
+                    if (unquote && o3 instanceof CharSequence) {
+                        o3 = unquote((CharSequence) o3);
+                    }
+                    args.add(o3);
+                }
+            }
+        }
         if (args.size() == 1)
         {
             return args.get(0);
@@ -444,11 +450,14 @@ public class Expander extends BaseTokenizer
                 {
                     generators.add(part.subSequence(start, part.length() - 1));
                 }
-                generators = generators.stream()
-                        .map(uncheck(cs -> expand(cs, false, false, false)))
-                        .flatMap(o -> o instanceof Collection ? asCollection(o).stream() : Stream.of(o))
-                        .map(String::valueOf)
-                        .collect(Collectors.toList());
+                List<CharSequence> l = new ArrayList<>();
+                for (CharSequence cs : generators) {
+                    Object o1 = expand(cs, false, false, false);
+                    for (Object o2 : toCollection(o1)) {
+                        l.add(String.valueOf(o2));
+                    }
+                }
+                generators = l;
 
                 // If there's no splitting comma, expand with the braces
                 if (generators.size() < 2)
@@ -467,37 +476,15 @@ public class Expander extends BaseTokenizer
             else
             {
                 List<CharSequence> prevGenerated = generated;
-                generated = generators.stream()
-                        .flatMap(s -> prevGenerated.stream().map(cs -> String.valueOf(cs) + s))
-                        .collect(Collectors.toList());
+                generated = new ArrayList<>();
+                for (CharSequence s : generators) {
+                    for (Object cs : prevGenerated) {
+                        generated.add(String.valueOf(cs) + s);
+                    }
+                }
             }
         }
         return generated;
-    }
-
-    public interface FunctionExc<T, R>
-    {
-        R apply(T t) throws Exception;
-    }
-
-    public static <T, R> Function<T, R> uncheck(FunctionExc<T, R> func)
-    {
-        return t -> {
-            try
-            {
-                return func.apply(t);
-            }
-            catch (Exception e)
-            {
-                return sneakyThrow(e);
-            }
-        };
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <E extends Throwable, T> T sneakyThrow(Throwable t) throws E
-    {
-        throw (E) t;
     }
 
     protected List<? extends CharSequence> generateFileNames(CharSequence arg) throws IOException
@@ -570,6 +557,14 @@ public class Expander extends BaseTokenizer
             {
                 doubleQuoted = true;
             }
+            else if (c == '~')
+            {
+                Object home = evaluate.get("HOME");
+                if (home != null)
+                {
+                    buf.append(home.toString());
+                }
+            }
             else
             {
                 if ("*(|<[?".indexOf(c) >= 0 && !hasUnescapedReserved)
@@ -586,9 +581,9 @@ public class Expander extends BaseTokenizer
         }
 
         String org = buf.toString();
-        List<String> expanded = new ArrayList<>();
-        Path dir;
-        String prefix;
+        final List<String> expanded = new ArrayList<>();
+        final Path dir;
+        final String prefix;
         if (pfx.indexOf('/') >= 0)
         {
             pfx = pfx.substring(0, pfx.lastIndexOf('/'));
@@ -601,7 +596,7 @@ public class Expander extends BaseTokenizer
             dir = currentDir;
             prefix = "";
         }
-        PathMatcher matcher = dir.getFileSystem().getPathMatcher("glob:" + arg);
+        final GlobPathMatcher matcher = new GlobPathMatcher(arg.toString());
         Files.walkFileTree(dir,
                 EnumSet.of(FileVisitOption.FOLLOW_LINKS),
                 Integer.MAX_VALUE,
@@ -619,11 +614,18 @@ public class Expander extends BaseTokenizer
                             return FileVisitResult.SKIP_SUBTREE;
                         }
                         Path r = dir.relativize(file);
-                        if (matcher.matches(r))
+                        if (matcher.matches(r.toString(), true))
                         {
                             expanded.add(prefix + r.toString());
                         }
-                        return FileVisitResult.CONTINUE;
+                        if (matcher.matches(r.toString(), false))
+                        {
+                            return FileVisitResult.CONTINUE;
+                        }
+                        else
+                        {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
                     }
 
                     @Override
@@ -632,7 +634,7 @@ public class Expander extends BaseTokenizer
                         if (!Files.isHidden(file))
                         {
                             Path r = dir.relativize(file);
-                            if (matcher.matches(r))
+                            if (matcher.matches(r.toString(), true))
                             {
                                 expanded.add(prefix + r.toString());
                             }
@@ -641,14 +643,12 @@ public class Expander extends BaseTokenizer
                     }
 
                     @Override
-                    public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException
-                    {
+                    public FileVisitResult visitFileFailed(Path file, IOException exc) {
                         return FileVisitResult.CONTINUE;
                     }
 
                     @Override
-                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException
-                    {
+                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
                         return FileVisitResult.CONTINUE;
                     }
                 });
@@ -738,13 +738,26 @@ public class Expander extends BaseTokenizer
                     {
                         if (expand instanceof ArgList)
                         {
-                            return new ArgList((ArgList) expand).stream()
-                                    .map(String::valueOf)
-                                    .map(s -> "\"" + s + "\"").collect(Collectors.toList());
+                            List<String> l = new ArrayList<>();
+                            for (Object o : (ArgList) expand) {
+                                l.add("\"" + String.valueOf(o) + "\"");
+                            }
+                            return l;
                         }
                         else if (expand instanceof Collection)
                         {
-                            return asCollection(expand).stream().map(String::valueOf).collect(Collectors.joining(" ", "\"", "\""));
+                            StringBuilder sb = new StringBuilder();
+                            sb.append("\"");
+                            boolean first = true;
+                            for (Object o : asCollection(expand)) {
+                                if (first) {
+                                    first = false;
+                                } else {
+                                    sb.append(" ");
+                                }
+                                sb.append(String.valueOf(o));
+                            }
+                            return sb.append("\"").toString();
                         }
                         else if (expand != null)
                         {
@@ -838,6 +851,7 @@ public class Expander extends BaseTokenizer
                     case '8':
                     case '9':
                         ch = 0;
+                        i--;
                         for (int j = 0; j < 3; j++)
                         {
                             c = i < arg.length() - 1 ? arg.charAt(++i) : -1;
@@ -1207,32 +1221,34 @@ public class Expander extends BaseTokenizer
             }
 
             // Map to List conversion
-            boolean _flagk = flagk;
-            boolean _flagv = flagv;
-            Function<Object, Object> toCollection = v -> v instanceof Map
+            final boolean _flagk = flagk;
+            final boolean _flagv = flagv;
+            final Function<Object, Object> toCollection = v -> v instanceof Map
                     ? toList(asMap(v), _flagk, _flagv)
                     : v != null && v.getClass().isArray()
-                        ? Arrays.asList((Object[]) v)
-                        : v;
+                    ? Arrays.asList((Object[]) v)
+                    : v;
 
             //
             // String transformations
             //
-            BiFunction<Function<String, String>, Object, Object> stringApplyer = (func, v) -> {
+            final BiFunction<Function<String, String>, Object, Object> stringApplyer = (func, v) -> {
                 v = toCollection.apply(v);
                 if (v instanceof Collection)
                 {
-                    return asCollection(v).stream()
-                            .map(String::valueOf)
-                            .map(func)
-                            .collect(Collectors.toList());
+                    List<String> l = new ArrayList<>();
+                    for (Object i : asCollection(v)) {
+                        l.add(func.apply(String.valueOf(i)));
+                    }
+                    return l;
                 }
                 else if (v != null)
                 {
                     return func.apply(v.toString());
                 }
-                else
+                else {
                     return null;
+                }
             };
 
             if (ch == '+')
@@ -1466,6 +1482,33 @@ public class Expander extends BaseTokenizer
                             val = list.get(nLeft ? list.size() - 1 - iLeft : iLeft);
                         }
                     }
+                    else if (val != null && val.getClass().isArray())
+                    {
+                        if (sLeft.equals("@") || sLeft.equals("*"))
+                        {
+                            Object array = val;
+                            List<Object> l = new AbstractList<Object>()
+                            {
+                                @Override
+                                public Object get(int index)
+                                {
+                                    return Array.get(array, index);
+                                }
+                                @Override
+                                public int size()
+                                {
+                                    return Array.getLength(array);
+                                }
+                            };
+                            val = new ArgList(l);
+                        }
+                        else
+                        {
+                            int iLeft = Integer.parseInt(sLeft);
+                            Object array = val;
+                            val = Array.get(array, iLeft);
+                        }
+                    }
                     else if (val != null)
                     {
                         if (sLeft.equals("@") || sLeft.equals("*"))
@@ -1527,9 +1570,14 @@ public class Expander extends BaseTokenizer
                 if (val instanceof Collection)
                 {
                     String j = flagj != null ? flagj : " ";
-                    val = asCollection(val).stream()
-                            .map(String::valueOf)
-                            .collect(Collectors.joining(j));
+                    StringBuilder sb = new StringBuilder();
+                    for (Object i : asCollection(val)) {
+                        if (sb.length() > 0) {
+                            sb.append(j);
+                        }
+                        sb.append(String.valueOf(i));
+                    }
+                    val = sb.toString();
                     joined = true;
                 }
             }
@@ -1568,25 +1616,30 @@ public class Expander extends BaseTokenizer
                 if (val instanceof Collection)
                 {
                     String j = flagj != null ? flagj : " ";
-                    val = asCollection(val).stream()
-                            .map(String::valueOf)
-                            .collect(Collectors.joining(j));
+                    StringBuilder sb = new StringBuilder();
+                    for (Object i : asCollection(val)) {
+                        if (sb.length() > 0) {
+                            sb.append(j);
+                        }
+                        sb.append(String.valueOf(i));
+                    }
+                    val = sb.toString();
                 }
             }
 
             // Simple word splitting
             if (flags != null)
             {
-                String _flags = flags;
                 val = toCollection.apply(val);
                 if (!(val instanceof Collection))
                 {
                     val = Collections.singletonList(val);
                 }
-                val = asCollection(val).stream()
-                        .map(String::valueOf)
-                        .flatMap(s -> Arrays.stream(s.split(_flags)))
-                        .collect(Collectors.toList());
+                List<String> l = new ArrayList<>();
+                for (Object i : asCollection(val)) {
+                    Collections.addAll(l, String.valueOf(i).split(flags));
+                }
+                val = l;
             }
 
             // Case modification
@@ -1612,7 +1665,7 @@ public class Expander extends BaseTokenizer
             // Quote
             if (flagq != 0)
             {
-                int _flagq = flagq;
+                final int _flagq = flagq;
                 val = stringApplyer.apply(s -> quote(s, _flagq), val);
                 inQuote = true;
             }
@@ -1626,7 +1679,7 @@ public class Expander extends BaseTokenizer
                 val = toCollection.apply(val);
                 if (val instanceof Collection)
                 {
-                    val = new ArrayList<>(new HashSet<>(asCollection(val)));
+                    val = new ArrayList<>(new LinkedHashSet<>(asCollection(val)));
                 }
             }
 
@@ -1639,11 +1692,13 @@ public class Expander extends BaseTokenizer
                     List<Object> list;
                     if (flagn)
                     {
-                        boolean _flagi = flagi;
-                        list = asCollection(val).stream()
-                                .map(String::valueOf)
-                                .sorted((s1, s2) -> numericCompare(s1, s2, _flagi))
-                                .collect(Collectors.toList());
+                        final boolean _flagi = flagi;
+                        List<String> l = new ArrayList<>();
+                        for (Object i : asCollection(val)) {
+                            l.add(String.valueOf(i));
+                        }
+                        l.sort((s1, s2) -> numericCompare(s1, s2, _flagi));
+                        list = (List) l;
                     }
                     else if (flaga)
                     {
@@ -1651,11 +1706,13 @@ public class Expander extends BaseTokenizer
                     }
                     else
                     {
-                        Comparator<String> comparator = flagi ? String.CASE_INSENSITIVE_ORDER : Comparator.naturalOrder();
-                        list = asCollection(val).stream()
-                                .map(String::valueOf)
-                                .sorted(comparator)
-                                .collect(Collectors.toList());
+                        Comparator<String> comparator = flagi ? String.CASE_INSENSITIVE_ORDER : String::compareTo;
+                        List<String> l = new ArrayList<>();
+                        for (Object i : asCollection(val)) {
+                            l.add(String.valueOf(i));
+                        }
+                        l.sort(comparator);
+                        list = (List) l;
                     }
                     if (flagO)
                     {
@@ -1671,27 +1728,36 @@ public class Expander extends BaseTokenizer
                 val = toCollection.apply(val);
                 if (val instanceof Collection)
                 {
-                    val = asCollection(val).stream()
-                            .map(String::valueOf)
-                            .collect(Collectors.joining(" "));
+                    StringBuilder sb = new StringBuilder();
+                    for (Object i : asCollection(val)) {
+                        if (sb.length() > 0) {
+                            sb.append(" ");
+                        }
+                        sb.append(String.valueOf(i));
+                    }
+                    val = sb.toString();
                 }
             }
 
             // Empty argument removal
             if (val instanceof Collection)
             {
-                val = asCollection(val).stream()
-                        .filter(o -> !(o instanceof CharSequence) || ((CharSequence) o).length() > 0)
-                        .collect(Collectors.toList());
+                List<Object> l = new ArrayList<>();
+                for (Object o : asCollection(val)) {
+                    if (!(o instanceof CharSequence) || ((CharSequence) o).length() > 0) {
+                        l.add(o);
+                    }
+                }
+                val = l;
             }
 
             if (asPattern && !inQuote && !flagPattern)
             {
                 val = toCollection.apply(val);
-                Stream<Object> stream = val instanceof Collection ? asCollection(val).stream() : Stream.of(val);
-                List<String> patterns = stream.map(String::valueOf)
-                        .map(s -> quote(s, 2))
-                        .collect(Collectors.toList());
+                List<String> patterns = new ArrayList<>();
+                for (Object o : toCollection(val)) {
+                    patterns.add(quote(String.valueOf(o), 2));
+                }
                 val = patterns.size() == 1 ? patterns.get(0) : patterns;
             }
 
@@ -1791,30 +1857,30 @@ public class Expander extends BaseTokenizer
             for (int i = 0; i < s.length(); i++)
             {
                 char ch = s.charAt(i);
-                if (ch < 32 || ch >= 127)
+                switch (ch)
                 {
-                    buf.append("\\").append(Integer.toOctalString(ch));
-                }
-                else
-                {
-                    switch (ch)
-                    {
-                        case '\n':
-                            buf.append("\\n");
-                            break;
-                        case '\t':
-                            buf.append("\\t");
-                            break;
-                        case '\r':
-                            buf.append("\\r");
-                            break;
-                        case '\'':
-                            buf.append("\\'");
-                            break;
-                        default:
+                    case '\n':
+                        buf.append("\\n");
+                        break;
+                    case '\t':
+                        buf.append("\\t");
+                        break;
+                    case '\r':
+                        buf.append("\\r");
+                        break;
+                    case '\'':
+                        buf.append("\\'");
+                        break;
+                    default:
+                        if (ch < 32 || ch >= 127)
+                        {
+                            buf.append("\\").append(Integer.toOctalString(ch));
+                        }
+                        else
+                            {
                             buf.append(ch);
-                            break;
-                    }
+                        }
+                        break;
                 }
             }
             buf.append("'");
@@ -2042,6 +2108,12 @@ public class Expander extends BaseTokenizer
         return (Collection) val;
     }
 
+    private Collection<Object> toCollection(Object val) {
+        return val instanceof Collection
+                ? asCollection(val)
+                : Collections.singleton(val);
+    }
+
     @SuppressWarnings("unchecked")
     private Map<Object, Object> asMap(Object val)
     {
@@ -2096,8 +2168,7 @@ public class Expander extends BaseTokenizer
             {
                 inQuote = true;
                 getch();
-                Object val = getName(closing);
-                return val;
+                return getName(closing);
             }
             finally
             {
@@ -2138,8 +2209,7 @@ public class Expander extends BaseTokenizer
         return expandPattern(sub).toString();
     }
 
-    private CharSequence findUntil(CharSequence text, int start, String closing) throws Exception
-    {
+    private CharSequence findUntil(CharSequence text, int start, String closing) {
         int braces = 0;
         boolean escaped = false;
         boolean doubleQuoted = false;

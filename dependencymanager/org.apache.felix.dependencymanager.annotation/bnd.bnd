@@ -14,21 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-Bundle-Version: 4.2.0
--buildpath:  \
-	osgi.core;version=4.2,\
-	de.twentyeleven.skysail.org.json-osgi;version=20080701.0,\
-	biz.aQute.bndlib;version=2.4
+Bundle-Version: 4.2.1
+-buildpath: \
+	biz.aQute.bndlib;version=2.4,\
+	osgi.core;version=6.0,\
+	osgi.cmpn;version=6.0
 Private-Package: \
-	org.apache.felix.dm.annotation.plugin.bnd, \
-	org.json.*
+	org.apache.felix.dm.annotation.plugin.bnd
 Export-Package: \
 	org.apache.felix.dm.annotation.api
-Include-Resource: META-INF/=resources/LICENSE,\
-	META-INF/=resources/NOTICE,\
-	META-INF/=resources/DEPENDENCIES,\
-	META-INF/=${workspace}/release/resources/changelog.txt
-
+Include-Resource: META-INF/=resources/
 Bundle-Name: Apache Felix Dependency Manager Annotations
 Bundle-Description: Annotations for Apache Felix Dependency Manager
 Bundle-Category: osgi

@@ -18,6 +18,7 @@
  */
 package org.apache.felix.framework.util.manifestparser;
 
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,12 +34,12 @@ import java.util.regex.Pattern;
 
 import org.apache.felix.framework.Logger;
 import org.apache.felix.framework.util.FelixConstants;
-import org.apache.felix.framework.util.VersionRange;
 import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.osgi.framework.Filter;
 import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.Version;
+import org.osgi.framework.VersionRange;
 
 public class NativeLibraryClause
 {
@@ -70,10 +71,11 @@ public class NativeLibraryClause
     private static final String OS_WINDOWS_NT = "windowsnt";
     private static final String OS_WINDOWS_SERVER_2008 = "windowsserver2008";
     private static final String OS_WINDOWS_SERVER_2012 = "windowsserver2012";
+    private static final String OS_WINDOWS_SERVER_2016 = "windowsserver2016";
     private static final String OS_WINDOWS_VISTA = "windowsvista";
     private static final String OS_WINDOWS_XP = "windowsxp";
     private static final String OS_WIN_32 = "win32";
-    
+
     private static final String PROC_X86_64 = "x86-64";
     private static final String PROC_X86 = "x86";
     private static final String PROC_68K = "68k";
@@ -120,8 +122,8 @@ public class NativeLibraryClause
 
     /**
      * Initialize the processor and os name aliases from Felix Config.
-     * 
-     * @param config
+     *
+     * @param configMap
      */
     public static synchronized void initializeNativeAliases(Map configMap)
     {
@@ -237,13 +239,17 @@ public class NativeLibraryClause
         String language = (String) configMap.get(FelixConstants.FRAMEWORK_LANGUAGE);
 
         // Check library's osname.
-        if (!checkOSNames(osName, getOSNames()))
+        if ((getOSNames() != null) &&
+            (getOSNames().length > 0) &&
+            !checkOSNames(osName, getOSNames()))
         {
             return false;
         }
 
         // Check library's processor.
-        if (!checkProcessors(processorName, getProcessors()))
+        if ((getProcessors() != null) &&
+            (getProcessors().length > 0) &&
+            !checkProcessors(processorName, getProcessors()))
         {
             return false;
         }
@@ -266,7 +272,6 @@ public class NativeLibraryClause
 
         // Check library's selection-filter if specified.
         if ((getSelectionFilter() != null) &&
-            (getSelectionFilter().length() >= 0) &&
             !checkSelectionFilter(configMap, getSelectionFilter()))
         {
             return false;
@@ -308,16 +313,16 @@ public class NativeLibraryClause
         return false;
     }
 
-    private boolean checkOSVersions(String osVersion, String[] osversions) 
+    private boolean checkOSVersions(String osVersion, String[] osversions)
         throws BundleException
     {
-        Version currentOSVersion = Version.parseVersion(formatOSVersion(osVersion));
+        Version currentOSVersion = Version.parseVersion(normalizeOSVersion(osVersion));
         for (int i = 0; (osversions != null) && (i < osversions.length); i++)
         {
             try
             {
-                VersionRange range = VersionRange.parse(osversions[i]);
-                if (range.isInRange(currentOSVersion))
+                VersionRange range = new VersionRange(osversions[i]);
+                if (range.includes(currentOSVersion))
                 {
                     return true;
                 }
@@ -453,7 +458,7 @@ public class NativeLibraryClause
                     }
                     else if (property.equals(Constants.BUNDLE_NATIVECODE_OSVERSION))
                     {
-                        osVersionList.add(normalizeOSVersion(value));
+                        osVersionList.add(normalizeOSVersionRange(value));
                     }
                     else if (property.equals(Constants.BUNDLE_NATIVECODE_PROCESSOR))
                     {
@@ -492,26 +497,6 @@ public class NativeLibraryClause
             logger.log(Logger.LOG_ERROR,
                 "Error parsing native library header.", ex);
             throw ex;
-        }
-    }
-
-    public static String formatOSVersion(String value)
-    {
-        // Header: 'Bundle-NativeCode', Parameter: 'osversion'
-        // Standardized 'osversion': major.minor.micro, only digits
-        try
-        {
-            Pattern versionPattern = Pattern.compile("\\d+\\.?\\d*\\.?\\d*");
-            Matcher matcher = versionPattern.matcher(value);
-            if (matcher.find())
-            {
-                value = matcher.group();
-            }
-            return Version.parseVersion(value).toString();
-        }
-        catch (Exception ex)
-        {
-            return Version.emptyVersion.toString();
         }
     }
 
@@ -557,7 +542,7 @@ public class NativeLibraryClause
         //If we don't find a match do it the old way for compatibility
         if (value.startsWith("win"))
         {
-            String os = "win";
+            String os = OS_WIN_32;
             if (value.indexOf("32") >= 0 || value.indexOf("*") >= 0)
             {
                 os = OS_WIN_32;
@@ -589,6 +574,10 @@ public class NativeLibraryClause
             else if (value.indexOf("2012") >= 0)
             {
                 os = OS_WINDOWS_SERVER_2012;
+            }
+            else if (value.indexOf("2016") >= 0)
+            {
+                os = OS_WINDOWS_SERVER_2016;
             }
             else if (value.indexOf("xp") >= 0)
             {
@@ -622,7 +611,7 @@ public class NativeLibraryClause
             {
                 os = OS_WINDOWS_10;
             }
-            
+
             return os;
         }
         else if (value.startsWith(OS_LINUX))
@@ -685,6 +674,10 @@ public class NativeLibraryClause
         {
             return OS_VXWORKS;
         }
+        else if (value.startsWith(OS_EPOC))
+        {
+            return OS_EPOC;
+        }
         return value;
     }
 
@@ -722,7 +715,7 @@ public class NativeLibraryClause
         }
         else if (value.startsWith(PROC_ARM))
         {
-            return PROC_ARM;
+            return ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN ? PROC_ARM_BE : PROC_ARM_LE;
         }
         else if (value.startsWith(PROC_ALPHA))
         {
@@ -749,20 +742,109 @@ public class NativeLibraryClause
         {
             return PROC_SPARC;
         }
+
         return value;
+    }
+
+    public static String normalizeOSVersionRange(String value)
+    {
+        if (value.indexOf(',') >= 0)
+        {
+            try
+            {
+                String s = value.substring(1, value.length() - 1);
+                String vlo = s.substring(0, s.indexOf(',')).trim();
+                String vhi = s.substring(s.indexOf(',') + 1, s.length()).trim();
+                return new VersionRange(value.charAt(0), new Version(cleanupVersion(vlo)), new Version(
+                    cleanupVersion(vhi)), value.charAt(value.length() - 1)).toString();
+            }
+
+            catch (Exception ex)
+            {
+                return Version.emptyVersion.toString();
+            }
+        }
+
+        return normalizeOSVersion(value);
     }
 
     public static String normalizeOSVersion(String value)
     {
-        // Header: 'Bundle-NativeCode', Parameter: 'osversion'
-        // Standardized 'osversion': major.minor.micro, only digits
-        try
+        return new Version(cleanupVersion(value)).toString();
+    }
+
+    private static final Pattern FUZZY_VERSION = Pattern.compile( "(\\d+)(\\.(\\d+)(\\.(\\d+))?)?([^a-zA-Z0-9](.*))?",
+        Pattern.DOTALL );
+
+    private static String cleanupVersion( String version )
+    {
+        StringBuilder result = new StringBuilder();
+        Matcher m = FUZZY_VERSION.matcher( version );
+        if ( m.matches() )
         {
-            return VersionRange.parse(value).toString();
+            String major = m.group( 1 );
+            String minor = m.group( 3 );
+            String micro = m.group( 5 );
+            String qualifier = m.group( 7 );
+
+            if ( major != null )
+            {
+                result.append( major );
+                if ( minor != null )
+                {
+                    result.append( "." );
+                    result.append( minor );
+                    if ( micro != null )
+                    {
+                        result.append( "." );
+                        result.append( micro );
+                        if ( qualifier != null && qualifier.length() > 0 )
+                        {
+                            result.append( "." );
+                            cleanupModifier( result, qualifier );
+                        }
+                    }
+                    else if ( qualifier != null && qualifier.length() > 0)
+                    {
+                        result.append( ".0." );
+                        cleanupModifier( result, qualifier );
+                    }
+                    else
+                    {
+                        result.append( ".0" );
+                    }
+                }
+                else if ( qualifier != null && qualifier.length() > 0 )
+                {
+                    result.append( ".0.0." );
+                    cleanupModifier( result, qualifier );
+                }
+                else
+                {
+                    result.append( ".0.0" );
+                }
+            }
         }
-        catch (Exception ex)
+        else
         {
-            return Version.emptyVersion.toString();
+            result.append( "0.0.0." );
+            cleanupModifier( result, version );
+        }
+        return result.toString();
+    }
+
+
+    private static void cleanupModifier( StringBuilder result, String modifier )
+    {
+        for ( int i = 0; i < modifier.length(); i++ )
+        {
+            char c = modifier.charAt( i );
+            if ( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || c == '_'
+                || c == '-' )
+                result.append( c );
+            else
+                result.append( '_' );
         }
     }
+
 }

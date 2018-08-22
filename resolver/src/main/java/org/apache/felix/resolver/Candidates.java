@@ -24,11 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.felix.resolver.ResolverImpl.PermutationType;
 import org.apache.felix.resolver.ResolverImpl.ResolveSession;
+import org.apache.felix.resolver.reason.ReasonException;
 import org.apache.felix.resolver.util.*;
 import org.osgi.framework.Version;
 import org.osgi.framework.namespace.*;
 import org.osgi.resource.*;
 import org.osgi.service.resolver.HostedCapability;
+import org.osgi.service.resolver.ResolutionException;
 import org.osgi.service.resolver.ResolveContext;
 
 class Candidates
@@ -155,7 +157,6 @@ class Candidates
         return m_delta;
     }
 
-    @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
     public void populate(Collection<Resource> resources)
     {
         ResolveContext rc = m_session.getContext();
@@ -185,17 +186,15 @@ class Candidates
                 addCandidates(result.candidates);
                 result.candidates = null;
                 result.remaining = null;
-                if ((rc instanceof FelixResolveContext) && !Util.isFragment(resource))
+                Collection<Resource> relatedResources = rc.findRelatedResources(resource);
+                m_session.setRelatedResources(resource, relatedResources);
+                for (Resource relatedResource : relatedResources)
                 {
-                    Collection<Resource> ondemandFragments = ((FelixResolveContext) rc).getOndemandResources(resource);
-                    for (Resource fragment : ondemandFragments)
+                    if (m_session.isValidRelatedResource(relatedResource))
                     {
-                        if (m_session.isValidOnDemandResource(fragment))
-                        {
-                            // This resource is a valid on demand resource;
-                            // populate it now, consider it optional
-                            toPopulate.addFirst(fragment);
-                        }
+                        // This resource is a valid related resource;
+                        // populate it now, consider it optional
+                        toPopulate.addFirst(relatedResource);
                     }
                 }
                 continue;
@@ -253,19 +252,6 @@ class Candidates
         return !PackageNamespace.RESOLUTION_DYNAMIC.equals(res);
     }
 
-    private boolean isMandatory(ResolveContext rc, Requirement requirement) {
-        // The requirement is optional
-        if (Util.isOptional(requirement)) {
-            return false;
-        }
-        // This is a fragment that is already resolved and there is no unresolved hosts to attach it to
-        Resource resource = requirement.getResource();
-        if (Util.isFragment(resource) && rc.getWirings().containsKey(resource)) {
-            return false;
-        }
-        return true;
-    }
-
     private void populateSubstitutables()
     {
         for (Map.Entry<Resource, PopulateResult> populated : m_populateResultCache.fast())
@@ -280,6 +266,7 @@ class Candidates
     private void populateSubstitutables(Resource resource)
     {
         // Collect the package names exported
+        @SuppressWarnings("serial")
         OpenHashMap<String, List<Capability>> exportNames = new OpenHashMap<String, List<Capability>>() {
             @Override
             protected List<Capability> compute(String s) {
@@ -740,7 +727,7 @@ class Candidates
     public CandidateSelector clearMultipleCardinalityCandidates(Requirement req, Collection<Capability> caps)
     {
         // this is a special case where we need to completely replace the CandidateSelector
-    	// this method should never be called from normal Candidates permutations
+        // this method should never be called from normal Candidates permutations
         CandidateSelector candidates = m_candidateMap.get(req);
         List<Capability> remaining = new ArrayList<Capability>(candidates.getRemainingCandidates());
         remaining.removeAll(caps);
@@ -847,6 +834,30 @@ class Candidates
         }
 
         // Step 4
+        // First copy candidates for wrapped requirements to the host.
+        for (WrappedResource hostResource : hostResources) {
+            for (Requirement r : hostResource.getRequirements(null))
+            {
+                Requirement origReq = ((WrappedRequirement) r).getDeclaredRequirement();
+                CandidateSelector cands = m_candidateMap.get(origReq);
+                if (cands != null)
+                {
+                    if (cands instanceof ShadowList)
+                    {
+                        m_candidateMap.put(r, ShadowList.deepCopy((ShadowList) cands));
+                    } else {
+                        m_candidateMap.put(r, cands.copy());
+                    }
+                    for (Capability cand : cands.getRemainingCandidates())
+                    {
+                        Set<Requirement> dependents = m_dependentMap.get(cand);
+                        dependents.remove(origReq);
+                        dependents.add(r);
+                    }
+                }
+            }
+        }
+
         for (WrappedResource hostResource : hostResources)
         {
             // Replaces capabilities from fragments with the capabilities
@@ -928,23 +939,6 @@ class Candidates
                                 shadow.replace(origCap, c);
                             }
                         }
-                    }
-                }
-            }
-
-            // Copy candidates for fragment requirements to the host.
-            for (Requirement r : hostResource.getRequirements(null))
-            {
-                Requirement origReq = ((WrappedRequirement) r).getDeclaredRequirement();
-                CandidateSelector cands = m_candidateMap.get(origReq);
-                if (cands != null)
-                {
-                    m_candidateMap.put(r, cands.copy());
-                    for (Capability cand : cands.getRemainingCandidates())
-                    {
-                        Set<Requirement> dependents = m_dependentMap.get(cand);
-                        dependents.remove(origReq);
-                        dependents.add(r);
                     }
                 }
             }
@@ -1209,7 +1203,61 @@ class Candidates
     public boolean canRemoveCandidate(Requirement req)
     {
         CandidateSelector candidates = m_candidateMap.get(req);
-        return ((candidates != null) && (candidates.getRemainingCandidateCount() > 1 || Util.isOptional(req)));
+        if (candidates != null)
+        {
+            Capability current = candidates.getCurrentCandidate();
+            if (current != null)
+            {
+                // IMPLEMENTATION NOTE:
+                // Here we check for a req that is used for a substitutable export.
+                // If we find a substitutable req then an extra check is done to see
+                // if the substitutable capability is currently depended on as the
+                // only provider of some other requirement.  If it is then we do not
+                // allow the candidate to be removed.
+                // This is done because of the way we attempt to reduce permutations
+                // checked by permuting all used requirements that conflict with a
+                // directly imported/required capability in one go.
+                // If we allowed these types of substitutable requirements to move
+                // to the next capability then the permutation would be thrown out
+                // because it would cause some other resource to not resolve.
+                // That in turn would throw out the complete permutation along with
+                // any follow on permutations that could have resulted.
+                // See ResolverImpl::checkPackageSpaceConsistency
+
+                // Check if the current candidate is substitutable by the req;
+                // This check is necessary here because of the way we traverse used blames
+                // allows multiple requirements to be permuted in one Candidates
+                if (req.equals(m_subtitutableMap.get(current)))
+                {
+                    // this is a substitute req,
+                    // make sure there is not an existing dependency that would fail if we substitute
+                    Set<Requirement> dependents = m_dependentMap.get(current);
+                    if (dependents != null)
+                    {
+                        for (Requirement dependent : dependents)
+                        {
+                            CandidateSelector dependentSelector = m_candidateMap.get(
+                                    dependent);
+                            // If the dependent selector only has one capability left then check if
+                            // the current candidate is the selector's current candidate.
+                            if (dependentSelector != null
+                                    && dependentSelector.getRemainingCandidateCount() <= 1)
+                            {
+                                if (current.equals(
+                                        dependentSelector.getCurrentCandidate()))
+                                {
+                                    // return false since we do not want to allow this requirement
+                                    // to substitute the capability
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return candidates.getRemainingCandidateCount() > 1 || Util.isOptional(req);
+        }
+        return false;
     }
 
     static class DynamicImportFailed extends ResolutionError {
@@ -1228,6 +1276,11 @@ class Candidates
             return Collections.singleton(requirement);
         }
 
+        @Override
+        public ResolutionException toException() {
+            return new ReasonException(ReasonException.Reason.DynamicImport, getMessage(), null, getUnresolvedRequirements());
+        }
+
     }
 
     static class FragmentNotSelectedError extends ResolutionError {
@@ -1240,6 +1293,16 @@ class Candidates
 
         public String getMessage() {
             return "Fragment was not selected for attachment: " + resource;
+        }
+
+        @Override
+        public Collection<Requirement> getUnresolvedRequirements() {
+            return resource.getRequirements(HostNamespace.HOST_NAMESPACE);
+        }
+
+        @Override
+        public ResolutionException toException() {
+            return new ReasonException(ReasonException.Reason.FragmentNotSelected, getMessage(), null, getUnresolvedRequirements());
         }
 
     }
@@ -1270,6 +1333,12 @@ class Candidates
 
         public Collection<Requirement> getUnresolvedRequirements() {
             return Collections.singleton(requirement);
+        }
+
+        @Override
+        public ResolutionException toException() {
+            return new ReasonException(
+                ReasonException.Reason.MissingRequirement, getMessage(), cause != null ? cause.toException() : null, getUnresolvedRequirements());
         }
 
     }

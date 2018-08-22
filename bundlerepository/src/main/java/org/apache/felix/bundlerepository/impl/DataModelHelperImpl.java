@@ -91,7 +91,6 @@ public class DataModelHelperImpl implements DataModelHelper
     public Repository repository(final URL url) throws Exception
     {
         InputStream is = null;
-        BufferedReader br = null;
 
         try
         {
@@ -101,17 +100,29 @@ public class DataModelHelperImpl implements DataModelHelper
                 ZipEntry entry = zin.getNextEntry();
                 while (entry != null)
                 {
-                    if (entry.getName().equals("repository.xml"))
+                    if (entry.getName().equals("repository.xml") || entry.getName().equals("index.xml"))
                     {
                         is = zin;
                         break;
                     }
                     entry = zin.getNextEntry();
                 }
+                // as the ZipInputStream is not used further it would not be closed.
+                if (is == null)
+                {
+                    try
+                    {
+                        zin.close();
+                    }
+                    catch (IOException ex)
+                    {
+                        // Not much we can do.
+                    }
+                }
             }
             else if (url.getPath().endsWith(".gz"))
             {
-                is = new GZIPInputStream(FileUtil.openURL(url));                    
+                is = new GZIPInputStream(FileUtil.openURL(url));
             }
             else
             {
@@ -120,8 +131,18 @@ public class DataModelHelperImpl implements DataModelHelper
 
             if (is != null)
             {
-                RepositoryImpl repository = repository(is);
-                repository.setURI(url.toExternalForm());
+                String repositoryUri = url.toExternalForm();
+                String baseUri;
+                if (repositoryUri.endsWith(".zip")) {
+                    baseUri = new StringBuilder("jar:").append(repositoryUri).append("!/").toString();
+                } else if (repositoryUri.endsWith(".xml")) {
+                    baseUri = repositoryUri.substring(0, repositoryUri.lastIndexOf('/') + 1);
+                } else {
+                    baseUri = repositoryUri;
+                }
+                RepositoryImpl repository = repository(is, URI.create(baseUri));
+                repository.setURI(repositoryUri);
+
                 return repository;
             }
             else
@@ -146,10 +167,11 @@ public class DataModelHelperImpl implements DataModelHelper
         }
     }
 
-    public RepositoryImpl repository(InputStream is) throws Exception
+    public RepositoryImpl repository(InputStream is, URI baseURI) throws Exception
     {
         RepositoryParser parser = RepositoryParser.getParser();
-        RepositoryImpl repository = parser.parseRepository(is);
+        RepositoryImpl repository = parser.parseRepository(is, baseURI);
+        
         return repository;
     }
 
@@ -454,18 +476,17 @@ public class DataModelHelperImpl implements DataModelHelper
             }
             private byte[] loadEntry(String name) throws IOException
             {
-                InputStream is = FileUtil.openURL(bundleUrl);
+                ZipInputStream zis = new ZipInputStream(FileUtil.openURL(bundleUrl));
                 try
                 {
-                    ZipInputStream jis = new ZipInputStream(is);
-                    for (ZipEntry e = jis.getNextEntry(); e != null; e = jis.getNextEntry())
+                    for (ZipEntry e = zis.getNextEntry(); e != null; e = zis.getNextEntry())
                     {
                         if (name.equalsIgnoreCase(e.getName()))
                         {
                             ByteArrayOutputStream baos = new ByteArrayOutputStream();
                             byte[] buf = new byte[1024];
                             int n;
-                            while ((n = jis.read(buf, 0, buf.length)) > 0)
+                            while ((n = zis.read(buf, 0, buf.length)) > 0)
                             {
                                 baos.write(buf, 0, n);
                             }
@@ -475,7 +496,7 @@ public class DataModelHelperImpl implements DataModelHelper
                 }
                 finally
                 {
-                    is.close();
+                    zis.close();
                 }
                 return null;
             }

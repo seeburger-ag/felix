@@ -20,18 +20,16 @@ package org.apache.felix.dm.itest.util;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
-
-import org.junit.Assert;
-import junit.framework.TestCase;
 
 import org.apache.felix.dm.Component;
 import org.apache.felix.dm.ComponentExecutorFactory;
 import org.apache.felix.dm.DependencyManager;
+import org.junit.Assert;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.BundleException;
@@ -43,6 +41,8 @@ import org.osgi.framework.ServiceReference;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.log.LogService;
 
+import junit.framework.TestCase;
+
 /**
  * Base class for all integration tests.
  * 
@@ -53,7 +53,7 @@ public abstract class TestBase extends TestCase implements LogService, Framework
     protected final static int LOG_LEVEL = LogService.LOG_WARNING;
     
     // optional thread pool used by parallel dependency managers
-    private volatile ExecutorService m_threadPool;
+    protected volatile ForkJoinPool m_threadPool;
     
     // flag used to check if the threadpool must be used for a given test.
     protected volatile boolean m_parallel;
@@ -90,7 +90,7 @@ public abstract class TestBase extends TestCase implements LogService, Framework
         m_dm = new DependencyManager(context);
         if (m_parallel) {
             warn("Using threadpool ...");
-            m_threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+            m_threadPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
             m_componentExecutorFactoryReg = context.registerService(ComponentExecutorFactory.class.getName(), 
                 new ComponentExecutorFactory() {
                     @Override
@@ -210,6 +210,16 @@ public abstract class TestBase extends TestCase implements LogService, Framework
             Thread.sleep(ms);
         } catch (InterruptedException e) {
         }
+    }
+    
+    /**
+     * Helper method used to convert a dictionary which with untyped keys to a dictionary having a String key.
+     * (this method is useful when converting a Properties object into a compatible Dictionary<String, Object>
+     * object that is often needed in OSGI R6 API. 
+     */
+    @SuppressWarnings("unchecked")
+	public static Dictionary<String, ?> toR6Dictionary(Dictionary<?,?> properties) {
+    	return (Dictionary<String, ?>) properties;
     }
 
     public void log(int level, String message) {

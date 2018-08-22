@@ -19,21 +19,26 @@
 package org.apache.felix.dm.impl;
 
 import java.util.Dictionary;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
+import org.apache.felix.dm.Logger;
+import org.apache.felix.dm.context.ComponentContext;
 import org.apache.felix.dm.context.Event;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
 
 /**
- * @author <a href="mailto:dev@felix.apache.org">Felix Project Team</a>
+ * An event for a service dependency.
+ * Not thread safe, but this class is assumed to be used under the protection of the component serial queue.
  */
 public class ServiceEventImpl extends Event {
     /**
      * The service reference on which a service dependency depends on
      */
-	private final ServiceReference m_reference; 
-		
+	private final ServiceReference<?> m_reference; 
+	
     /**
      * The bundle context of the bundle which has created the service dependency. If not null, 
      * will be used in close method when ugetting the service reference of the dependency.
@@ -41,23 +46,54 @@ public class ServiceEventImpl extends Event {
 	private final BundleContext m_bundleContext;
 	
     /**
-     * The bundle which has created the service dependency. If not null, will be used to ensure that the bundle is still active before
-     * ungetting the service reference of the dependency. (ungetting a service reference on a bundle which is not
-     * active triggers an exception, and this may degrade performance, especially when doing some benchmarks).
+     * The bundle which has created the service dependency.
      */
 	private final Bundle m_bundle;
 	
-	public ServiceEventImpl(ServiceReference reference, Object service) {
-	    this(null, null, reference, service);
-	}
-
-    public ServiceEventImpl(Bundle bundle, BundleContext bundleContext, ServiceReference reference, Object service) {
-	    super(service);
-	    m_bundle = bundle;
-	    m_bundleContext = bundleContext;
-		m_reference = reference;
-	}
+	/**
+	 * Protects in case close is called twice.
+	 */
+	private final AtomicBoolean m_closed = new AtomicBoolean(false); 
 	
+	/**
+	 * Our logger.
+	 */
+	private final Logger m_logger;
+
+	/**
+	 * The actual service.
+	 */
+	private volatile Object m_service;
+	
+    public ServiceEventImpl(ComponentContext ctx, ServiceReference<?> reference, Object service) {
+	    super(service);
+		m_service = service;
+	    m_bundle = ctx.getBundle();
+	    m_bundleContext = ctx.getBundleContext();
+		m_reference = reference;
+		m_logger = ctx.getLogger();
+    }
+
+    /**
+     * Returns the actual service, or null if the service reference is invalid.
+     * @return the service or null if the service is not available anymore.
+     */
+    @SuppressWarnings("unchecked")
+	@Override
+    public <T> T getEvent() {
+        if (m_service == null) {
+        	try {
+    		    m_service = m_bundleContext.getService(m_reference);
+    		    if (m_service == null) {
+            		debug(() -> "Service " + m_reference + " unavailable");
+    		    }
+        	} catch (Exception t) {
+        		error(() -> "Could not get service from service reference " + m_reference, t);
+        	}
+        }
+        return (T) m_service;
+    }
+
 	/**
 	 * Returns the bundle which has declared a service dependency.
 	 */
@@ -75,10 +111,10 @@ public class ServiceEventImpl extends Event {
 	/**
 	 * Returns the reference service dependency.
 	 */
-	public ServiceReference getReference() {
+	public ServiceReference<?> getReference() {
 		return m_reference;
 	}
-	    
+		    
     @SuppressWarnings("unchecked")
 	@Override
     public Dictionary<String, Object> getProperties() {
@@ -110,15 +146,24 @@ public class ServiceEventImpl extends Event {
 
     @Override
     public void close() {
-        if (m_bundleContext != null) {
-            try {
-                // Optimization: don't call ungetService if the bundle referring to the service is not active. 
-                // This optim is important when doing benchmarks where the referring bundle is being stopped 
-                // while some dependencies are lost concurrently (here we want to avoid having many exception thrown).
-                if (m_bundle == null || m_bundle.getState() == Bundle.ACTIVE) {
-                    m_bundleContext.ungetService(m_reference);
-                }
-            } catch (IllegalStateException e) {}
+        if (m_closed.compareAndSet(false, true)) {
+        	if (m_service != null) {
+        		try {
+            		m_bundleContext.ungetService(m_reference);
+        		} catch (IllegalStateException e) {}
+        	}
         }
+    }
+        
+    private void error(Supplier<String> msg, Exception err) {
+    	if (m_logger != null) {
+    		m_logger.err("%s", err, msg.get());
+    	}
+    }
+    
+    private void debug(Supplier<String> msg) {
+    	if (m_logger != null) {
+    		m_logger.debug("%s", msg.get());
+    	}
     }
 }

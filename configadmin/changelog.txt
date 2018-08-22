@@ -1,3 +1,64 @@
+Changes in 1.9.6
+----------------
+** Bug
+    * [FELIX-5908] : NoClassDefFoundError for the CM Security Domain combiner
+
+ 
+Changes in 1.9.4
+----------------
+** Bug
+    * [FELIX-5892] : Repeated calls to getFactoryConfiguration return different configuration instances
+
+
+Changes in 1.9.2
+----------------
+** Bug
+    * [FELIX-5845] : org.apache.felix.cm.impl.persistence.PersistenceManagerProxy broken
+
+
+Changes in 1.9.0
+----------------
+** Improvement
+    * [FELIX-5288] - Implement RFC 227 (OSGi R7 Update)
+    * [FELIX-5351] - Implement coordinations (OSGi R7)
+    * [FELIX-5289] - Alias PID Handling of Factory Configurations (OSGi R7)
+    * [FELIX-5290] - Locking Configuration Records (OSGi R7)
+    * [FELIX-5291] - Improve Configuration Updates (OSGi R7)
+    * [FELIX-5292] - Capabilities (OSGi R7)
+    * [FELIX-5293] - Improved ConfigurationPlugin Support (OSGi R7)
+    * [FELIX-5468] - Refactor persistence handling
+    * [FELIX-5693] - Improve persistence manager handling
+    * [FELIX-5695] - Use Java 7 as base version
+    * [FELIX-5778] - Refactor factory configuration handling
+** Bug
+    * [FELIX-5745] - Empty collections should be allowed as property value
+
+
+Changes from 1.8.14 to 1.8.16
+-----------------------------
+** Bug
+    * [FELIX-5669] : Registering a PersistenceManager causes duplicate caches.
+
+
+Changes from 1.8.12 to 1.8.14
+-----------------------------
+** Bug
+    * [FELIX-5443] - Frequent Changes cause UpdateThread to ConcurrentModificationException
+    * [FELIX-5435] - Service does not get loaded with updated properties that have been modified on file system after felix framework restart
+
+
+Changes from 1.8.10 to 1.8.12
+-----------------------------
+
+** Improvement
+    * [FELIX-5380] - Reduce quite useless log verbosity
+    * [FELIX-5366] - Additional Unit Tests for ConfigurationHandler
+
+** Bug
+    * [FELIX-5368] - ConfigurationManager ignores NotCachablePersistenceManager marker interface
+    * [FELIX-5385] - ConfigAdmin uses wrong security when calling ManagedServices
+
+
 Changes from 1.8.8 to 1.8.10
 ----------------------------
 

@@ -181,6 +181,12 @@ public class ServiceRegistry
         // Bundles are allowed to get a reference while unregistering
         // get fresh set of bundles (should be empty, but this is a sanity check)
         ungetServices(ref);
+
+        // Now flush all usage counts as the registration is invalid
+        for (Bundle usingBundle : m_inUseMap.keySet())
+        {
+            flushUsageCount(usingBundle, ref, null);
+        }
     }
 
     private void ungetServices(final ServiceReference<?> ref)
@@ -286,8 +292,8 @@ public class ServiceRegistry
     @SuppressWarnings("unchecked")
     public <S> S getService(final Bundle bundle, final ServiceReference<S> ref, final boolean isServiceObjects)
     {
-    	// prototype scope is only possible if called from ServiceObjects
-    	final boolean isPrototype = isServiceObjects && ref.getProperty(Constants.SERVICE_SCOPE) == Constants.SCOPE_PROTOTYPE;
+        // prototype scope is only possible if called from ServiceObjects
+        final boolean isPrototype = isServiceObjects && ref.getProperty(Constants.SERVICE_SCOPE) == Constants.SCOPE_PROTOTYPE;
         UsageCount usage = null;
         Object svcObj = null;
 
@@ -369,6 +375,20 @@ public class ServiceRegistry
                         // if someone concurrently changed the holder, loop again
                         if (holder != usage.m_svcHolderRef.get())
                             holder = null;
+                    }
+                    if (svcObj != null && isPrototype)
+                    {
+                        UsageCount existingUsage = obtainUsageCount(bundle, ref, svcObj, null);
+                        if (existingUsage != null && existingUsage != usage)
+                        {
+                            flushUsageCount(bundle, ref, usage);
+                            usage = existingUsage;
+                            incrementToPositiveValue(usage.m_count);
+                            if ( isServiceObjects )
+                            {
+                                incrementToPositiveValue(usage.m_serviceObjectsCount);
+                            }
+                        }
                     }
                 }
             }
@@ -465,9 +485,19 @@ public class ServiceRegistry
                         {
                             if (usage.m_svcHolderRef.compareAndSet(holder, null))
                             {
-                                // Remove reference from usages array.
-                                ((ServiceRegistrationImpl.ServiceReferenceImpl) ref)
-                                    .getRegistration().ungetService(bundle, svc);
+                                // Temporarily increase the usage again so that the 
+                                // service factory still sees the usage in the unget
+                                usage.m_count.incrementAndGet();
+                                try
+                                {
+                                    // Remove reference from usages array.
+                                    reg.ungetService(bundle, svc);
+                                }
+                                finally 
+                                {
+                                    // now we can decrease the usage again
+                                    usage.m_count.decrementAndGet();
+                                }
 
                             }
                         }
@@ -543,7 +573,7 @@ public class ServiceRegistry
             UsageCount[] usages = entry.getValue();
             for (int useIdx = 0; useIdx < usages.length; useIdx++)
             {
-                if (usages[useIdx].m_ref.equals(ref))
+                if (usages[useIdx].m_ref.equals(ref) && usages[useIdx].m_count.get() > 0)
                 {
                     // Add the bundle to the array to be returned.
                     if (bundles == null)

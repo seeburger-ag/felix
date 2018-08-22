@@ -21,7 +21,7 @@ package org.apache.felix.scr.impl;
 
 import java.util.LinkedList;
 
-import org.apache.felix.scr.impl.helper.SimpleLogger;
+import org.apache.felix.scr.impl.logger.ScrLogger;
 import org.osgi.service.log.LogService;
 
 
@@ -35,11 +35,13 @@ class ComponentActorThread implements Runnable
     // sentinel task to terminate this thread
     private static final Runnable TERMINATION_TASK = new Runnable()
     {
+        @Override
         public void run()
         {
         }
 
 
+        @Override
         public String toString()
         {
             return "Component Actor Terminator";
@@ -47,14 +49,13 @@ class ComponentActorThread implements Runnable
     };
 
     // the queue of Runnable instances  to be run
-    private LinkedList<Runnable> tasks;
+    private final LinkedList<Runnable> tasks = new LinkedList<>();
 
-    private SimpleLogger logger;
+    private final ScrLogger logger;
 
 
-    ComponentActorThread( SimpleLogger log )
+    ComponentActorThread( final ScrLogger log )
     {
-        tasks = new LinkedList<Runnable>();
         logger = log;
     }
 
@@ -64,6 +65,7 @@ class ComponentActorThread implements Runnable
     // happening and keeps on waiting for the next Runnable. If the Runnable
     // taken from the queue is this thread instance itself, the thread
     // terminates.
+    @Override
     public void run()
     {
         logger.log( LogService.LOG_DEBUG, "Starting ComponentActorThread", null );
@@ -75,14 +77,22 @@ class ComponentActorThread implements Runnable
             {
                 while ( tasks.isEmpty() )
                 {
+                    boolean interrupted = Thread.interrupted();
                     try
                     {
                         tasks.wait();
                     }
                     catch ( InterruptedException ie )
                     {
-                        Thread.currentThread().interrupt();
+                        interrupted = true;
                         // don't care
+                    }
+                    finally
+                    {
+                        if (interrupted)
+                        { // restore interrupt status
+                            Thread.currentThread().interrupt();
+                        }
                     }
                 }
 
@@ -126,14 +136,23 @@ class ComponentActorThread implements Runnable
         {
             while ( !tasks.isEmpty() )
             {
+                boolean interrupted = Thread.interrupted();
                 try
                 {
                     tasks.wait();
                 }
                 catch ( InterruptedException e )
                 {
-                    Thread.currentThread().interrupt();
-                    logger.log( LogService.LOG_ERROR, "Interrupted exception waiting for queue to empty", e );
+                    interrupted = true;
+                    logger.log(LogService.LOG_ERROR,
+                        "Interrupted exception waiting for queue to empty", e);
+                }
+                finally
+                {
+                    if (interrupted)
+                    { // restore interrupt status
+                        Thread.currentThread().interrupt();
+                    }
                 }
             }
         }
@@ -148,8 +167,8 @@ class ComponentActorThread implements Runnable
             // append to the task queue
             tasks.add( task );
 
-            logger.log( LogService.LOG_DEBUG, "Adding task [{0}] as #{1} in the queue"
-                    , new Object[] {task, tasks.size()}, null );
+            logger.log( LogService.LOG_DEBUG, "Adding task [{0}] as #{1} in the queue", null,
+                    task, tasks.size(), null );
 
             // notify the waiting thread
             tasks.notifyAll();

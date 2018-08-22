@@ -23,6 +23,7 @@ import java.util.Map;
 
 import javax.servlet.Servlet;
 
+import org.apache.felix.http.base.internal.dispatch.MultipartConfig;
 import org.apache.felix.http.base.internal.util.PatternUtil;
 import org.osgi.dto.DTO;
 import org.osgi.framework.ServiceReference;
@@ -37,12 +38,6 @@ import org.osgi.service.http.whiteboard.HttpWhiteboardConstants;
  */
 public class ServletInfo extends WhiteboardServiceInfo<Servlet>
 {
-    /**
-     * Properties starting with this prefix are passed as servlet init parameters to the
-     * {@code init()} method of the servlet.
-     */
-    private static final String SERVLET_INIT_PREFIX = "servlet.init.";
-
     /**
      * The name of the servlet.
      */
@@ -72,6 +67,13 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
     private final boolean isResource;
 
     /**
+     * Specifies the multipart config for this servlet
+     * or {@code null} if not enabled.
+     */
+    private final MultipartConfig multipartConfig;
+
+
+    /**
      * The servlet initialization parameters as provided during registration of the servlet.
      */
     private final Map<String, String> initParams;
@@ -85,7 +87,27 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
         this.errorPage = getStringArrayProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_ERROR_PAGE);
         this.patterns = getStringArrayProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_PATTERN);
         this.asyncSupported = getBooleanProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_ASYNC_SUPPORTED);
-        this.initParams = getInitParams(ref, SERVLET_INIT_PREFIX);
+        if ( getBooleanProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_MULTIPART_ENABLED) )
+        {
+            MultipartConfig cfg = null;
+            try
+            {
+                cfg = new MultipartConfig(getIntProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_MULTIPART_FILESIZETHRESHOLD),
+                        getStringProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_MULTIPART_LOCATION),
+                        getLongProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_MULTIPART_MAXFILESIZE),
+                        getLongProperty(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_MULTIPART_MAXREQUESTSIZE));
+            }
+            catch (final IllegalArgumentException iae)
+            {
+                cfg = MultipartConfig.INVALID_CONFIG;
+            }
+            this.multipartConfig = cfg;
+        }
+        else
+        {
+            this.multipartConfig = null;
+        }
+        this.initParams = getInitParams(ref, HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_INIT_PARAM_PREFIX);
         this.isResource = false;
         this.prefix = null;
     }
@@ -98,9 +120,46 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
         this.patterns = resource.getPatterns();
         this.errorPage = null;
         this.asyncSupported = false;
+        this.multipartConfig = null;
         this.initParams = Collections.emptyMap();
         this.isResource = true;
         this.prefix = resource.getPrefix();
+    }
+
+    private Integer getIntProperty(final ServiceReference<Servlet> ref, final String key)
+    {
+        final Object value = ref.getProperty(key);
+        if (value instanceof String)
+        {
+            return Integer.valueOf((String) value);
+        }
+        else if (value instanceof Number)
+        {
+            return ((Number) value).intValue();
+        }
+        else if ( value != null )
+        {
+            throw new IllegalArgumentException();
+        }
+        return null;
+    }
+
+    private long getLongProperty(final ServiceReference<Servlet> ref, final String key)
+    {
+        final Object value = ref.getProperty(key);
+        if (value instanceof String)
+        {
+            return Long.valueOf((String) value);
+        }
+        else if (value instanceof Number)
+        {
+            return ((Number) value).longValue();
+        }
+        else if ( value != null )
+        {
+            throw new IllegalArgumentException();
+        }
+        return -1;
     }
 
     @SuppressWarnings("rawtypes")
@@ -121,6 +180,7 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
         this.patterns = new String[] {pattern};
         this.initParams = Collections.unmodifiableMap(initParams);
         this.asyncSupported = true;
+        this.multipartConfig = MultipartConfig.DEFAULT_CONFIG;
         this.errorPage = null;
         this.isResource = false;
         this.prefix = null;
@@ -129,7 +189,9 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
     @Override
     public boolean isValid()
     {
-        boolean valid = super.isValid() && !(isEmpty(this.patterns) && isEmpty(this.errorPage));
+        boolean valid = super.isValid()
+                && !(isEmpty(this.patterns) && isEmpty(this.errorPage) && isEmpty(this.name))
+                && this.multipartConfig != MultipartConfig.INVALID_CONFIG;
         if ( valid )
         {
             if ( this.patterns != null )
@@ -184,5 +246,10 @@ public class ServletInfo extends WhiteboardServiceInfo<Servlet>
     public String getPrefix()
     {
         return prefix;
+    }
+
+    public MultipartConfig getMultipartConfig()
+    {
+        return multipartConfig;
     }
 }

@@ -56,7 +56,7 @@ javac.target:          1.8
 #javac.debug:           on
 
 ## Bnd Options
--sources:               false
+-sources:               true
 #-sourcepath:           ${project}/src
 
 
@@ -79,3 +79,14 @@ javac.target:          1.8
 # see FELIX-4915
 #
 -removeheaders: Bnd-LastModified,Tool,Created-By,Include-Resource
+
+# Make baselining issues a warning instead of error when using Eclipse
+fixuptype: ${if;${is;${gestalt;batch};batch};error;warning}
+
+-fixupmessages: \
+  "Baseline ...";is:=${fixuptype},\
+  "The bundle version ...";is:=${fixuptype},\
+  "The baseline version ...";is:=${fixuptype}
+
+# Generates poms in artifacts.
+-pom: groupid = org.apache.felix

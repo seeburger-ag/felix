@@ -14,18 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
--buildpath:  \
-	osgi.core;version=4.2,\
-	osgi.cmpn;version=4.2,\
+-buildpath: \
 	${junit},\
 	org.apache.felix.dependencymanager.annotation;version=latest,\
 	org.apache.felix.dependencymanager;version=latest,\
 	org.apache.felix.dependencymanager.runtime;version=latest,\
-	org.apache.felix.dependencymanager.itest.api;version=latest
+	org.apache.felix.dependencymanager.itest.api;version=latest,\
+	osgi.core;version=6.0,\
+	osgi.cmpn;version=6.0
 -runbundles:  \
 	org.apache.felix.configadmin;version=1.8.8,\
 	org.apache.felix.metatype;version=1.0.4,\
-	org.apache.felix.gogo.runtime;version=0.10.0,\
+	org.apache.felix.gogo.runtime;version=1.0.6,\
 	org.apache.felix.log;version=1.0.1,\
 	org.apache.felix.dependencymanager;version=latest,\
 	org.apache.felix.dependencymanager.runtime;version=latest,\
@@ -54,3 +54,8 @@ Bundle-Description: Integration tests for Apache Felix Dependency Manager Runtim
 Bundle-Category: test
 Bundle-License: http://www.apache.org/licenses/LICENSE-2.0.txt
 Bundle-Vendor: The Apache Software Foundation
+
+
+# we do not release this project in binary distribution.
+-releaserepo: 
+-baseline: 

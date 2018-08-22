@@ -1,4 +1,4 @@
-/* 
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -20,7 +20,9 @@ package org.apache.felix.framework;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.net.*;
+import java.security.Permission;
 
 import org.apache.felix.framework.util.SecureAction;
 import org.apache.felix.framework.util.Util;
@@ -29,13 +31,13 @@ import org.osgi.framework.Bundle;
 
 class URLHandlersBundleStreamHandler extends URLStreamHandler
 {
-    private final Felix m_framework;
+    private final Object m_framework;
     private final SecureAction m_action;
 
-    public URLHandlersBundleStreamHandler(Felix framework)
+    public URLHandlersBundleStreamHandler(Object framework, SecureAction action)
     {
         m_framework = framework;
-        m_action = null;
+        m_action = action;
     }
 
     public URLHandlersBundleStreamHandler(SecureAction action)
@@ -44,19 +46,19 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
         m_action = action;
     }
 
-    protected synchronized URLConnection openConnection(URL url) throws IOException
+    protected URLConnection openConnection(URL url) throws IOException
     {
         if (!"felix".equals(url.getAuthority()))
         {
             checkPermission(url);
         }
-        if (m_framework != null)
+        Object framework = m_framework;
+
+        if (framework == null)
         {
-            return new URLHandlersBundleURLConnection(url, m_framework);
+            framework = URLHandlers.getFrameworkFromContext(Util.getFrameworkUUIDFromURL(url.getHost()));
         }
-        
-        Object framework = URLHandlers.getFrameworkFromContext();
-        
+
         if (framework != null)
         {
             if (framework instanceof Felix)
@@ -65,11 +67,13 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
             }
             try
             {
-                Class targetClass = framework.getClass().getClassLoader().loadClass(
+                ClassLoader loader = m_action.getClassLoader(framework.getClass());
+
+                Class targetClass = loader.loadClass(
                     URLHandlersBundleURLConnection.class.getName());
-                
-                Constructor constructor = m_action.getConstructor(targetClass, 
-                        new Class[]{URL.class, framework.getClass().getClassLoader().loadClass(
+
+                Constructor constructor = m_action.getConstructor(targetClass,
+                        new Class[]{URL.class, loader.loadClass(
                                 Felix.class.getName())});
                 m_action.setAccesssible(constructor);
                 return (URLConnection) m_action.invoke(constructor, new Object[]{url, framework});
@@ -82,7 +86,7 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
         throw new IOException("No framework context found");
     }
 
-    protected void parseURL(URL u, String spec, int start, int limit) 
+    protected void parseURL(URL u, String spec, int start, int limit)
     {
         super.parseURL(u, spec, start, limit);
 
@@ -92,31 +96,31 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
         }
     }
 
-    protected String toExternalForm(URL u) 
+    protected String toExternalForm(URL u)
     {
-        StringBuffer result = new StringBuffer();
+        StringBuilder result = new StringBuilder();
         result.append(u.getProtocol());
         result.append("://");
         result.append(u.getHost());
         result.append(':');
         result.append(u.getPort());
-        if (u.getPath() != null) 
+        if (u.getPath() != null)
         {
             result.append(u.getPath());
         }
-        if (u.getQuery() != null) 
+        if (u.getQuery() != null)
         {
             result.append('?');
             result.append(u.getQuery());
         }
-        if (u.getRef() != null) 
+        if (u.getRef() != null)
         {
             result.append("#");
             result.append(u.getRef());
         }
         return result.toString();
     }
-    
+
     protected java.net.InetAddress getHostAddress(URL u)
     {
         return null;
@@ -130,19 +134,47 @@ class URLHandlersBundleStreamHandler extends URLStreamHandler
             Object framework = m_framework;
             if (framework == null)
             {
-                framework = URLHandlers.getFrameworkFromContext();
-                if (!(framework instanceof Felix))
+                framework = URLHandlers.getFrameworkFromContext(Util.getFrameworkUUIDFromURL(u.getHost()));
+            }
+            try {
+                long bundleId = Util.getBundleIdFromRevisionId(Util.getRevisionIdFromURL(u.getHost()));
+
+                if (framework instanceof Felix)
                 {
-                    return false;
+                    Bundle bundle = ((Felix) framework).getBundle(bundleId);
+                    if (bundle != null)
+                    {
+                        sm.checkPermission(new AdminPermission(bundle, AdminPermission.RESOURCE));
+                        return true;
+                    }
+                }
+                else if (framework != null)
+                {
+                    Method method = m_action.getDeclaredMethod(framework.getClass(), "getBundle", new Class[]{long.class});
+                    m_action.setAccesssible(method);
+                    Object bundle = method.invoke(framework, bundleId);
+                    if (bundle != null)
+                    {
+                        ClassLoader loader = m_action.getClassLoader(framework.getClass());
+
+                        sm.checkPermission((Permission) m_action.getConstructor(
+                            loader.loadClass(AdminPermission.class.getName()),
+                            new Class[] {loader.loadClass(Bundle.class.getName()), String.class}).newInstance(bundle, AdminPermission.RESOURCE));
+                        return true;
+                    }
+                }
+                else
+                {
+                    throw new IOException("No framework context found");
                 }
             }
-            Felix felix = (Felix) framework;
-            long bundleId = Util.getBundleIdFromRevisionId(u.getHost());
-            Bundle bundle = felix.getBundle(bundleId);
-            if (bundle != null)
+            catch (SecurityException ex)
             {
-                sm.checkPermission(new AdminPermission(bundle, AdminPermission.RESOURCE));
-                return true;
+                throw ex;
+            }
+            catch (Exception ex)
+            {
+                throw new SecurityException(ex);
             }
         }
         else

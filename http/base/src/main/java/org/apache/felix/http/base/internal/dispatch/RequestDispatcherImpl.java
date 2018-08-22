@@ -39,7 +39,7 @@ public final class RequestDispatcherImpl implements RequestDispatcher
     private final ServletResolution resolution;
 
     public RequestDispatcherImpl(final ServletResolution resolution,
-    		final RequestInfo requestInfo)
+            final RequestInfo requestInfo)
     {
         this.resolution = resolution;
         this.requestInfo = requestInfo;
@@ -64,8 +64,9 @@ public final class RequestDispatcherImpl implements RequestDispatcher
                     this.resolution.handler.getContext(),
                     this.requestInfo,
                     DispatcherType.FORWARD,
-                    this.resolution.handler.getContextServiceId(),
-                    this.resolution.handler.getServletInfo().isAsyncSupported());
+                    this.resolution.handler.getServletInfo().isAsyncSupported(),
+                    this.resolution.handler.getMultipartConfig(),
+                    this.resolution.handler.getMultipartSecurityContext());
             final String requestURI = UriUtils.concat(this.requestInfo.servletPath, this.requestInfo.pathInfo);
             final FilterHandler[] filterHandlers = this.resolution.handlerRegistry.getFilterHandlers(this.resolution.handler, DispatcherType.FORWARD, requestURI);
 
@@ -100,8 +101,9 @@ public final class RequestDispatcherImpl implements RequestDispatcher
                 this.resolution.handler.getContext(),
                 this.requestInfo,
                 DispatcherType.INCLUDE,
-                this.resolution.handler.getContextServiceId(),
-                this.resolution.handler.getServletInfo().isAsyncSupported());
+                this.resolution.handler.getServletInfo().isAsyncSupported(),
+                this.resolution.handler.getMultipartConfig(),
+                this.resolution.handler.getMultipartSecurityContext());
         final String requestURI = UriUtils.concat(this.requestInfo.servletPath, this.requestInfo.pathInfo);
         final FilterHandler[] filterHandlers = this.resolution.handlerRegistry.getFilterHandlers(this.resolution.handler, DispatcherType.INCLUDE, requestURI);
 

@@ -21,11 +21,13 @@ package org.apache.felix.dm.runtime.itest.tests;
 import org.apache.felix.dm.itest.util.Ensure;
 import org.apache.felix.dm.itest.util.TestBase;
 import org.apache.felix.dm.runtime.itest.components.FELIX5337;
+import org.apache.felix.dm.runtime.itest.components.FELIX5337_MatchAllServicesWithFilter;
 import org.osgi.framework.ServiceRegistration;
 
 /**
  * Test test validates that we can lookup ALL existing services using annotation, and "(objectClass=*)" filter.
  */
+@SuppressWarnings("rawtypes")
 public class FELIX5337Test extends TestBase {
     public void testCatchAllServicesUsingAnnotation() {
         Ensure e = new Ensure();
@@ -35,6 +37,14 @@ public class FELIX5337Test extends TestBase {
         // remove our sequencer: this will stop S
         sr.unregister();
         // ensure that S is stopped and destroyed
-        e.waitForStep(3, 10000);
+        e.waitForStep(3, 5000);
+    }
+    
+    public void testCatchAllServicesWithFiltersUsingAnnotation() {
+        Ensure e = new Ensure();
+        ServiceRegistration sr = register(e, FELIX5337_MatchAllServicesWithFilter.ENSURE);
+        // wait for S to be started
+        e.waitForStep(1, 5000);
+        sr.unregister();
     }
 }

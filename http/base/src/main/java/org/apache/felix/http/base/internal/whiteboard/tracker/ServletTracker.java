@@ -29,8 +29,9 @@ public final class ServletTracker extends WhiteboardServiceTracker<Servlet>
 {
     public ServletTracker(final BundleContext context, final WhiteboardManager manager)
     {
-        super(manager, context, String.format("(&(objectClass=%s)(|(%s=*)(%s=*)))",
+        super(manager, context, String.format("(&(objectClass=%s)(|(%s=*)(%s=*)(%s=*)))",
                 Servlet.class.getName(),
+                HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_NAME,
                 HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_PATTERN,
                 HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_ERROR_PAGE));
     }

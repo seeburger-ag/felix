@@ -17,32 +17,77 @@
 package org.apache.felix.serializer.impl.json;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-import org.apache.felix.serializer.impl.json.JsonParser;
+import org.apache.felix.serializer.Parser;
+import org.junit.Before;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class JsonParserTest {
+    private Parser parser;
+
+    @Before
+    public void setup() {
+        parser = new DefaultJsonParser();        
+    }
+
     @Test
     public void testJsonSimple() {
         String json = "{\"hi\": \"ho\", \"ha\": true}";
-        JsonParser jp = new JsonParser(json);
-        Map<String, Object> m = jp.getParsed();
+        Map<String, Object> m = parser.parse(json);
         assertEquals(2, m.size());
         assertEquals("ho", m.get("hi"));
         assertTrue((Boolean) m.get("ha"));
     }
 
     @Test
+    public void testJsonWithNewline() {
+        String json = ""
+                + "{\n"
+                + "  \"hi\": \"ho\",\n"
+                + "  \"ha\": [\n"
+                + "    \"one\",\n"
+                + "    \"two\",\n"
+                + "    \"three\"\n"
+                + "  ]\n"
+                + "}\n"
+                + "\n";
+        Map<String, Object> m = parser.parse(json);
+        assertEquals(2, m.size());
+        assertEquals("ho", m.get("hi"));
+        assertEquals(3, ((List<?>)m.get("ha")).size());
+    }
+
+    @Test
+    public void testJsonWithCRLF() {
+        String json = ""
+                + "{\r\n"
+                + "  \"hi\": \"ho\",\r\n"
+                + "  \"ha\": [\r\n"
+                + "    \"one\",\r\n"
+                + "    \"two\",\r\n"
+                + "    \"three\"\r\n"
+                + "  ]\r\n"
+                + "}\r\n"
+                + "\r\n";
+        Map<String, Object> m = parser.parse(json);
+        assertEquals(2, m.size());
+        assertEquals("ho", m.get("hi"));
+        assertEquals(3, ((List<?>)m.get("ha")).size());
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     public void testJsonComplex() {
-        String json = "{\"a\": [1,2,3,4,5], \"b\": {\"x\": 12, \"y\": 42, \"z\": {\"test test\": \"hello hello\"}}}";
-        JsonParser jp = new JsonParser(json);
-        Map<String, Object> m = jp.getParsed();
-        assertEquals(2, m.size());
+        String json = "{\"a\": [1,2,3,4,5], \"b\": {\"x\": 12, \"y\": 42, \"z\": {\"test test\": \"hello hello\"}}, \"ddd\": 12.34}";
+        Map<String, Object> m = parser.parse(json);
+        assertEquals(3, m.size());
         assertEquals(Arrays.asList(1L, 2L, 3L, 4L, 5L), m.get("a"));
         Map<String, Object> mb = (Map<String, Object>) m.get("b");
         assertEquals(3, mb.size());
@@ -51,14 +96,24 @@ public class JsonParserTest {
         Map<String, Object> mz = (Map<String, Object>) mb.get("z");
         assertEquals(1, mz.size());
         assertEquals("hello hello", mz.get("test test"));
+        assertEquals(12.34d, ((Double) m.get("ddd")).doubleValue(), 0.0001d);
     }
 
     @Test
     public void testJsonArray() {
         String json = "{\"abc\": [\"x\", \"y\", \"z\"]}";
-        JsonParser jp = new JsonParser(json);
-        Map<String, Object> m = jp.getParsed();
+        Map<String, Object> m = parser.parse(json);
         assertEquals(1, m.size());
         assertEquals(Arrays.asList("x", "y", "z"), m.get("abc"));
+    }
+
+    @Test
+    public void testEmptyJsonArray() {
+        String json = "{\"abc\": {\"def\": []}}";
+        Map<String, Object> m = parser.parse(json);
+        assertEquals(1, m.size());
+        Map<String, Object> result = new HashMap<>();
+        result.put("def", Collections.emptyList());
+        assertEquals(result, m.get("abc"));
     }
 }

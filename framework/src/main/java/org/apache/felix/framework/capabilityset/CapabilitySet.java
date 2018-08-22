@@ -37,9 +37,9 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 import org.apache.felix.framework.util.SecureAction;
 import org.apache.felix.framework.util.StringComparator;
-import org.apache.felix.framework.util.VersionRange;
 import org.apache.felix.framework.wiring.BundleCapabilityImpl;
 import org.osgi.framework.Version;
+import org.osgi.framework.VersionRange;
 import org.osgi.framework.wiring.BundleCapability;
 import org.osgi.resource.Capability;
 
@@ -346,7 +346,7 @@ public class CapabilitySet
         for (Entry<String, Object> entry : attrs.entrySet())
         {
             if (((BundleCapabilityImpl) cap).isAttributeMandatory(entry.getKey())
-                && !matchMandatoryAttrbute(entry.getKey(), sf))
+                && !matchMandatoryAttribute(entry.getKey(), sf))
             {
                 return false;
             }
@@ -354,7 +354,7 @@ public class CapabilitySet
         return true;
     }
 
-    private static boolean matchMandatoryAttrbute(String attrName, SimpleFilter sf)
+    private static boolean matchMandatoryAttribute(String attrName, SimpleFilter sf)
     {
         if ((sf.getName() != null) && sf.getName().equals(attrName))
         {
@@ -409,7 +409,7 @@ public class CapabilitySet
 
             if(rhs != null && rhs instanceof VersionRange)
             {
-                return ((VersionRange)rhs).isInRange((Version)lhs);
+                return ((VersionRange)rhs).includes((Version)lhs);
             }
         }
 
@@ -562,7 +562,7 @@ public class CapabilitySet
 
     private static String removeWhitespace(String s)
     {
-        StringBuffer sb = new StringBuffer(s.length());
+        StringBuilder sb = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++)
         {
             if (!Character.isWhitespace(s.charAt(i)))
@@ -595,7 +595,7 @@ public class CapabilitySet
             }
             else if(lhs instanceof Version && rhsString.indexOf(',') >= 0)
             {
-                rhs = VersionRange.parse(rhsString);
+                rhs = new VersionRange(rhsString);
             }
             else
             {

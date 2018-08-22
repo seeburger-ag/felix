@@ -144,8 +144,16 @@ public class ClassScanner {
                 final Class<?> annotatedClass = project.getClassLoader().loadClass(src.getClassName());
 
                 this.process(annotatedClass, src, result);
-            } catch (final ClassNotFoundException cnfe) {
-                throw new SCRDescriptorException("Unable to load compiled class: " + src.getClassName(), src.getFile().toString(), cnfe);
+            } catch ( final SCRDescriptorFailureException e ) {
+                throw e;
+            } catch ( final SCRDescriptorException e ) {
+                throw e;
+            } catch ( final ClassNotFoundException e ) {
+                log.warn("ClassNotFoundException: " + e.getMessage());
+            } catch ( final NoClassDefFoundError e ) {
+                log.warn("NoClassDefFoundError: " + e.getMessage());
+            } catch (final Throwable t) {
+                throw new SCRDescriptorException("Unable to load compiled class: " + src.getClassName(), src.getFile().toString(), t);
             }
         }
         return result;
@@ -200,7 +208,9 @@ public class ClassScanner {
             try {
                 classReader = new ClassReader(input);
             } finally {
-                input.close();
+                if ( input != null ) {
+                    input.close();
+                }
             }
             final ClassNode classNode = new ClassNode();
             classReader.accept(classNode, SKIP_CODE | SKIP_DEBUG | SKIP_FRAMES);

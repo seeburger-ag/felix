@@ -18,24 +18,13 @@
  */
 package org.apache.felix.framework;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.security.ProtectionDomain;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.List;
-import java.util.Map;
-
 import org.apache.felix.framework.cache.Content;
 import org.apache.felix.framework.util.FelixConstants;
+import org.apache.felix.framework.util.MultiReleaseContent;
 import org.apache.felix.framework.util.SecureAction;
 import org.apache.felix.framework.util.Util;
 import org.apache.felix.framework.util.manifestparser.ManifestParser;
 import org.apache.felix.framework.util.manifestparser.NativeLibrary;
-import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.osgi.framework.Version;
@@ -47,13 +36,24 @@ import org.osgi.resource.Capability;
 import org.osgi.resource.Requirement;
 import org.osgi.resource.Resource;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.security.ProtectionDomain;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Map;
+
 public class BundleRevisionImpl implements BundleRevision, Resource
 {
     public final static int EAGER_ACTIVATION = 0;
     public final static int LAZY_ACTIVATION = 1;
 
     private final String m_id;
-    private final Map m_headerMap;
+    private final Map<String, Object> m_headerMap;
 
     private final String m_manifestVersion;
     private final boolean m_isExtension;
@@ -70,9 +70,9 @@ public class BundleRevisionImpl implements BundleRevision, Resource
 
     private final BundleImpl m_bundle;
 
-    private Content m_content;
-    private List<Content> m_contentPath;
-    private ProtectionDomain m_protectionDomain = null;
+    private volatile Content m_content;
+    private volatile List<Content> m_contentPath;
+    private volatile ProtectionDomain m_protectionDomain = null;
     private final static SecureAction m_secureAction = new SecureAction();
 
     // Bundle wiring when resolved.
@@ -96,8 +96,8 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         m_isExtension = false;
         m_isFragment = false;
         m_version = null;
-        m_declaredCaps = Collections.EMPTY_LIST;
-        m_declaredReqs = Collections.EMPTY_LIST;
+        m_declaredCaps = Collections.emptyList();
+        m_declaredReqs = Collections.emptyList();
         m_declaredNativeLibs = null;
         m_declaredActivationPolicy = EAGER_ACTIVATION;
         m_activationExcludes = null;
@@ -105,7 +105,7 @@ public class BundleRevisionImpl implements BundleRevision, Resource
     }
 
     BundleRevisionImpl(
-        BundleImpl bundle, String id, Map headerMap, Content content)
+        BundleImpl bundle, String id, Map<String, Object> headerMap, Content content)
         throws BundleException
     {
         m_bundle = bundle;
@@ -122,6 +122,8 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         // Record some of the parsed metadata. Note, if this is an extension
         // bundle it's exports are removed, since they will be added to the
         // system bundle directly later on.
+
+        m_isExtension = mp.isExtension();
         m_manifestVersion = mp.getManifestVersion();
         m_version = mp.getBundleVersion();
         m_declaredCaps = mp.getCapabilities();
@@ -135,7 +137,6 @@ public class BundleRevisionImpl implements BundleRevision, Resource
             ? null
             : ManifestParser.parseDelimitedString(mp.getActivationIncludeDirective(), ",");
         m_symbolicName = mp.getSymbolicName();
-        m_isExtension = mp.isExtension();
         m_isFragment = m_headerMap.containsKey(Constants.FRAGMENT_HOST);
     }
 
@@ -265,7 +266,7 @@ public class BundleRevisionImpl implements BundleRevision, Resource
     // Implementating details.
     //
 
-    public Map getHeaders()
+    public Map<String, Object> getHeaders()
     {
         return m_headerMap;
     }
@@ -319,12 +320,12 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         }
     }
 
-    public synchronized void setProtectionDomain(ProtectionDomain pd)
+    public void setProtectionDomain(ProtectionDomain pd)
     {
         m_protectionDomain = pd;
     }
 
-    public synchronized ProtectionDomain getProtectionDomain()
+    public ProtectionDomain getProtectionDomain()
     {
         return m_protectionDomain;
     }
@@ -333,17 +334,17 @@ public class BundleRevisionImpl implements BundleRevision, Resource
     // Content access methods.
     //
 
-    public synchronized Content getContent()
+    public Content getContent()
     {
         return m_content;
     }
 
-    synchronized void resetContent(Content content)
+    void resetContent(Content content)
     {
         m_content = content;
     }
 
-    synchronized List<Content> getContentPath()
+    List<Content> getContentPath()
     {
         if (m_contentPath == null)
         {
@@ -353,15 +354,19 @@ public class BundleRevisionImpl implements BundleRevision, Resource
             }
             catch (Exception ex)
             {
-                ((BundleImpl) m_bundle).getFramework().getLogger().log(
+                m_bundle.getFramework().getLogger().log(
                     m_bundle, Logger.LOG_ERROR, "Unable to get module class path.", ex);
             }
         }
         return m_contentPath;
     }
 
-    private List<Content> initializeContentPath() throws Exception
+    private synchronized List<Content> initializeContentPath() throws Exception
     {
+        if (m_contentPath != null)
+        {
+            return m_contentPath;
+        }
         List<Content> contentList = new ArrayList();
         calculateContentPath(this, getContent(), contentList, true);
 
@@ -390,7 +395,6 @@ public class BundleRevisionImpl implements BundleRevision, Resource
     private List calculateContentPath(
         BundleRevision revision, Content content, List<Content> contentList,
         boolean searchFragments)
-        throws Exception
     {
         // Creating the content path entails examining the bundle's
         // class path to determine whether the bundle JAR file itself
@@ -424,7 +428,8 @@ public class BundleRevisionImpl implements BundleRevision, Resource
             // Check for the bundle itself on the class path.
             if (classPathStrings.get(i).equals(FelixConstants.CLASS_PATH_DOT))
             {
-                localContentList.add(content);
+                localContentList.add(MultiReleaseContent.wrap(
+                    getBundle().getFramework()._getProperty("java.specification.version"), content));
             }
             else
             {
@@ -448,7 +453,8 @@ public class BundleRevisionImpl implements BundleRevision, Resource
                 // class path content list.
                 if (embeddedContent != null)
                 {
-                    localContentList.add(embeddedContent);
+                    localContentList.add(MultiReleaseContent.wrap(
+                        getBundle().getFramework()._getProperty("java.specification.version"),embeddedContent));
                 }
                 else
                 {
@@ -466,7 +472,8 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         // "." by default, as per the spec.
         if (localContentList.isEmpty())
         {
-            localContentList.add(content);
+            localContentList.add(MultiReleaseContent.wrap(
+                getBundle().getFramework()._getProperty("java.specification.version"),content));
         }
 
         // Now add the local contents to the global content list and return it.
@@ -480,7 +487,7 @@ public class BundleRevisionImpl implements BundleRevision, Resource
 
         // Remove leading slash, if present, but special case
         // "/" so that it returns a root URL...this isn't very
-        // clean or meaninful, but the Spring guys want it.
+        // clean or meaningful, but the Spring guys want it.
         if (name.equals("/"))
         {
             // Just pick a class path index since it doesn't really matter.
@@ -637,7 +644,7 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         {
             return m_secureAction.createURL(null,
                 FelixConstants.BUNDLE_URL_PROTOCOL + "://" +
-                m_id + ":" + port + path,
+                m_bundle.getFramework()._getProperty(Constants.FRAMEWORK_UUID) + "_" + m_id + ":" + port + path,
                 getBundle().getFramework().getBundleStreamHandler());
         }
         catch (MalformedURLException ex)

@@ -24,12 +24,12 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.*;
 
-import org.apache.felix.cm.file.ConfigurationHandler;
 import org.apache.felix.fileinstall.ArtifactInstaller;
 import org.apache.felix.fileinstall.ArtifactListener;
 import org.apache.felix.fileinstall.internal.Util.Logger;
 import org.apache.felix.utils.collections.DictionaryAsMap;
 import org.apache.felix.utils.properties.InterpolationHelper;
+import org.apache.felix.utils.properties.TypedProperties;
 import org.osgi.framework.*;
 import org.osgi.service.cm.*;
 
@@ -42,6 +42,7 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
     private final BundleContext context;
     private final ConfigurationAdmin configAdmin;
     private final FileInstall fileInstall;
+    private final Map<String, String> pidToFile = new HashMap<>();
     private ServiceRegistration registration;
 
     ConfigInstaller(BundleContext context, ConfigurationAdmin configAdmin, FileInstall fileInstall)
@@ -60,6 +61,26 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
                     ArtifactInstaller.class.getName()
                 },
                 this, null);
+        try
+        {
+            Configuration[] configs = configAdmin.listConfigurations(null);
+            if (configs != null)
+            {
+                for (Configuration config : configs)
+                {
+                    Dictionary dict = config.getProperties();
+                    String fileName = dict != null ? (String) dict.get( DirectoryWatcher.FILENAME ) : null;
+                    if (fileName != null)
+                    {
+                        pidToFile.put(config.getPid(), fileName);
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Util.log( context, Logger.LOG_INFO, "Unable to initialize configurations list", e );
+        }
     }
 
     public void destroy()
@@ -125,49 +146,46 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
             {
                 Configuration config = getConfigurationAdmin().getConfiguration(
                                             configurationEvent.getPid(),
-                                            configurationEvent.getFactoryPid());
+                                            "?");
                 Dictionary dict = config.getProperties();
-                String fileName = (String) dict.get( DirectoryWatcher.FILENAME );
+                String fileName = dict != null ? (String) dict.get( DirectoryWatcher.FILENAME ) : null;
                 File file = fileName != null ? fromConfigKey(fileName) : null;
-                if( file != null && file.isFile()   ) {
-                    if( fileName.endsWith( ".cfg" ) )
+                if( file != null && file.isFile() && canHandle( file ) ) {
+                    pidToFile.put(config.getPid(), fileName);
+                    TypedProperties props = new TypedProperties( bundleSubstitution() );
+                    try (Reader r = new InputStreamReader(new FileInputStream(file), encoding()))
                     {
-                        org.apache.felix.utils.properties.Properties props = new org.apache.felix.utils.properties.Properties( file, context );
-                        for( Enumeration e  = dict.keys(); e.hasMoreElements(); )
-                        {
-                            String key = e.nextElement().toString();
-                            if( !Constants.SERVICE_PID.equals(key)
-                                    && !ConfigurationAdmin.SERVICE_FACTORYPID.equals(key)
-                                    && !DirectoryWatcher.FILENAME.equals(key) )
-                            {
-                                String val = dict.get( key ).toString();
-                                props.put( key, val );
-                            }
-                        }
-                        props.save();
+                        props.load(r);
                     }
-                    else if( fileName.endsWith( ".config" ) )
+                    // remove "removed" properties from the cfg file
+                    List<String> propertiesToRemove = new ArrayList<>();
+                    for( String key : props.keySet() )
                     {
-                        OutputStream fos = new FileOutputStream( file );
-                        Properties props = new Properties();
-                        for( Enumeration e  = dict.keys(); e.hasMoreElements(); )
-                        {
-                            String key = e.nextElement().toString();
-                            if( !Constants.SERVICE_PID.equals(key)
-                                    && !ConfigurationAdmin.SERVICE_FACTORYPID.equals(key)
-                                    && !DirectoryWatcher.FILENAME.equals(key) )
-                            {
-                                props.put( key, dict.get( key ) );
-                            }
+                        if( dict.get(key) == null
+                                && !Constants.SERVICE_PID.equals(key)
+                                && !ConfigurationAdmin.SERVICE_FACTORYPID.equals(key)
+                                && !DirectoryWatcher.FILENAME.equals(key) ) {
+                            propertiesToRemove.add(key);
                         }
-                        try
+                    }
+                    for( Enumeration e  = dict.keys(); e.hasMoreElements(); )
+                    {
+                        String key = e.nextElement().toString();
+                        if( !Constants.SERVICE_PID.equals(key)
+                                && !ConfigurationAdmin.SERVICE_FACTORYPID.equals(key)
+                                && !DirectoryWatcher.FILENAME.equals(key) )
                         {
-                            ConfigurationHandler.write( fos, props );
+                            Object val = dict.get( key );
+                            props.put( key, val );
                         }
-                        finally
-                        {
-                            fos.close();
-                        }
+                    }
+                    for( String key : propertiesToRemove )
+                    {
+                        props.remove(key);
+                    }
+                    try (Writer fw = new OutputStreamWriter(new FileOutputStream(file), encoding()))
+                    {
+                        props.save( fw );
                     }
                     // we're just writing out what's already loaded into ConfigAdmin, so
                     // update file checksum since lastModified gets updated when writing
@@ -177,6 +195,23 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
             catch (Exception e)
             {
                 Util.log( context, Logger.LOG_INFO, "Unable to save configuration", e );
+            }
+        }
+
+        if (configurationEvent.getType() == ConfigurationEvent.CM_DELETED)
+        {
+            try {
+                String fileName = pidToFile.remove(configurationEvent.getPid());
+                File file = fileName != null ? fromConfigKey(fileName) : null;
+                if (file != null && file.isFile()) {
+                    if (!file.delete()) {
+                        throw new IOException("Unable to delete file: " + file);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Util.log( context, Logger.LOG_INFO, "Unable to delete configuration file", e );
             }
         }
     }
@@ -195,6 +230,12 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
         return true;
     }
 
+    String encoding()
+    {
+        String str = this.context.getProperty( DirectoryWatcher.CONFIG_ENCODING );
+        return str != null ? str : "ISO-8859-1";
+    }
+
     ConfigurationAdmin getConfigurationAdmin()
     {
         return configAdmin;
@@ -210,36 +251,30 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
      */
     boolean setConfig(final File f) throws Exception
     {
-        final Hashtable<String, Object> ht = new Hashtable<String, Object>();
+        final Hashtable<String, Object> ht = new Hashtable<>();
         final InputStream in = new BufferedInputStream(new FileInputStream(f));
         try
         {
-            if ( f.getName().endsWith( ".cfg" ) )
-            {
+            in.mark(1);
+            boolean isXml = in.read() == '<';
+            in.reset();
+            if (isXml) {
                 final Properties p = new Properties();
-                in.mark(1);
-                boolean isXml = in.read() == '<';
-                in.reset();
-                if (isXml) {
-                    p.loadFromXML(in);
-                } else {
-                    p.load(in);
-                }
-                Map<String, String> strMap = new HashMap<String, String>();
+                p.loadFromXML(in);
+                Map<String, String> strMap = new HashMap<>();
                 for (Object k : p.keySet()) {
                     strMap.put(k.toString(), p.getProperty(k.toString()));
                 }
                 InterpolationHelper.performSubstitution(strMap, context);
                 ht.putAll(strMap);
-            }
-            else if ( f.getName().endsWith( ".config" ) )
-            {
-                final Dictionary config = ConfigurationHandler.read(in);
-                final Enumeration i = config.keys();
-                while ( i.hasMoreElements() )
+            } else {
+                TypedProperties p = new TypedProperties( bundleSubstitution() );
+                try (Reader r = new InputStreamReader(in, encoding()))
                 {
-                    final Object key = i.nextElement();
-                    ht.put(key.toString(), config.get(key));
+                    p.load(r);
+                }
+                for (String k : p.keySet()) {
+                    ht.put(k, p.get(k));
                 }
             }
         }
@@ -252,7 +287,7 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
         Configuration config = getConfiguration(toConfigKey(f), pid[0], pid[1]);
 
         Dictionary<String, Object> props = config.getProperties();
-        Hashtable<String, Object> old = props != null ? new Hashtable<String, Object>(new DictionaryAsMap<String, Object>(props)) : null;
+        Hashtable<String, Object> old = props != null ? new Hashtable<String, Object>(new DictionaryAsMap<>(props)) : null;
         if (old != null) {
         	old.remove( DirectoryWatcher.FILENAME );
         	old.remove( Constants.SERVICE_PID );
@@ -339,11 +374,11 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
             Configuration newConfiguration;
             if (factoryPid != null)
             {
-                newConfiguration = getConfigurationAdmin().createFactoryConfiguration(pid, null);
+                newConfiguration = getConfigurationAdmin().createFactoryConfiguration(pid, "?");
             }
             else
             {
-                newConfiguration = getConfigurationAdmin().getConfiguration(pid, null);
+                newConfiguration = getConfigurationAdmin().getConfiguration(pid, "?");
             }
             return newConfiguration;
         }
@@ -361,6 +396,16 @@ public class ConfigInstaller implements ArtifactInstaller, ConfigurationListener
         {
             return null;
         }
+    }
+
+    TypedProperties.SubstitutionCallback bundleSubstitution() {
+        final InterpolationHelper.SubstitutionCallback cb = new InterpolationHelper.BundleContextSubstitutionCallback(context);
+        return new TypedProperties.SubstitutionCallback() {
+            @Override
+            public String getValue(String name, String key, String value) {
+                return cb.getValue(value);
+            }
+        };
     }
 
     private String escapeFilterValue(String s) {

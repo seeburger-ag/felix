@@ -18,8 +18,6 @@
  */
 package org.apache.felix.dm.annotation.plugin.bnd;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.Map;
 import java.util.Set;
 
@@ -70,8 +68,6 @@ public class AnnotationPlugin implements AnalyzerPlugin, Plugin {
      * @throws Exception on any errors.
      */
     public boolean analyzeJar(Analyzer analyzer) throws Exception {
-        m_logger = new BndLogger(m_reporter, analyzer.getBsn());
-
         try {
             init(analyzer);
 
@@ -115,7 +111,7 @@ public class AnnotationPlugin implements AnalyzerPlugin, Plugin {
         }
 
         catch (Throwable t) {
-            m_logger.error(parse(t));
+            m_logger.error("error: " + t.toString(), t);
         }
 
         finally {
@@ -126,7 +122,7 @@ public class AnnotationPlugin implements AnalyzerPlugin, Plugin {
     }
 
     private void init(Analyzer analyzer) {
-        m_logger.setLevel(parseOption(m_properties, LOGLEVEL, BndLogger.Level.Warn.toString()));
+        m_logger = new BndLogger(m_reporter, analyzer.getBsn(), parseOption(m_properties, LOGLEVEL, null));
         m_buildImportExportService = parseOption(m_properties, BUILD_IMPEXT, false);
         m_addRequireCapability = parseOption(m_properties, ADD_REQUIRE_CAPABILITY, false);
         analyzer.setExceptions(true);
@@ -164,17 +160,5 @@ public class AnnotationPlugin implements AnalyzerPlugin, Plugin {
             StringBuilder sb = new StringBuilder(requireCapability).append(",").append(DM_RUNTIME_CAPABILITY);
             analyzer.setProperty(REQUIRE_CAPABILITY, sb.toString());
         }
-    }
-
-    /**
-     * Parse an exception into a string.
-     * @param e The exception to parse
-     * @return the parsed exception
-     */
-    private static String parse(Throwable e) {
-        StringWriter buffer = new StringWriter();
-        PrintWriter pw = new PrintWriter(buffer);
-        e.printStackTrace(pw);
-        return (buffer.toString());
     }
 }

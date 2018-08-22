@@ -16,6 +16,7 @@
  */
 package org.apache.felix.http.base.internal.handler;
 
+import java.io.File;
 import java.io.IOException;
 
 import javax.servlet.Servlet;
@@ -24,8 +25,10 @@ import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 
 import org.apache.felix.http.base.internal.context.ExtServletContext;
+import org.apache.felix.http.base.internal.dispatch.MultipartConfig;
 import org.apache.felix.http.base.internal.logger.SystemLogger;
 import org.apache.felix.http.base.internal.runtime.ServletInfo;
+import org.osgi.framework.Bundle;
 import org.osgi.service.http.runtime.dto.DTOConstants;
 
 /**
@@ -34,6 +37,10 @@ import org.osgi.service.http.runtime.dto.DTOConstants;
  */
 public abstract class ServletHandler implements Comparable<ServletHandler>
 {
+    private static final String TEMP_DIR = System.getProperty("java.io.tmpdir");
+
+    private static final String JAVA_SERVLET_TEMP_DIR_PROP = "javax.servlet.content.tempdir";
+
     private final long contextServiceId;
 
     private final ServletInfo servletInfo;
@@ -44,6 +51,8 @@ public abstract class ServletHandler implements Comparable<ServletHandler>
 
     protected volatile int useCount;
 
+    private final MultipartConfig mpConfig;
+
     public ServletHandler(final long contextServiceId,
             final ExtServletContext context,
             final ServletInfo servletInfo)
@@ -51,6 +60,32 @@ public abstract class ServletHandler implements Comparable<ServletHandler>
         this.contextServiceId = contextServiceId;
         this.context = context;
         this.servletInfo = servletInfo;
+        final MultipartConfig origConfig = servletInfo.getMultipartConfig();
+        if ( origConfig != null )
+        {
+            String location = origConfig.multipartLocation;
+            if ( location == null ) {
+                final Object obj = context == null ? null : context.getAttribute(JAVA_SERVLET_TEMP_DIR_PROP);
+                if ( obj != null ) {
+                    if ( obj instanceof File ) {
+                        location = ((File)obj).getAbsolutePath();
+                    } else {
+                        location = obj.toString();
+                    }
+                }
+            }
+            if ( location == null ) {
+                location = TEMP_DIR;
+            }
+            this.mpConfig = new MultipartConfig(origConfig.multipartThreshold,
+                    location,
+                    origConfig.multipartMaxFileSize,
+                    origConfig.multipartMaxRequestSize);
+        }
+        else
+        {
+            this.mpConfig = null;
+        }
     }
 
     @Override
@@ -189,4 +224,13 @@ public abstract class ServletHandler implements Comparable<ServletHandler>
         return servletInfo.equals(other.servletInfo);
     }
 
+    public MultipartConfig getMultipartConfig()
+    {
+        return mpConfig;
+    }
+
+    public Bundle getMultipartSecurityContext()
+    {
+        return null;
+    }
 }

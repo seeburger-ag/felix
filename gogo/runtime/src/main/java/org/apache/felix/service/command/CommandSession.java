@@ -23,14 +23,21 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.apache.felix.gogo.api.Job;
-import org.apache.felix.gogo.api.JobListener;
-
 public interface CommandSession extends AutoCloseable
 {
+
+    /*
+     * Variable name to disable glob (filename) expansion
+     */
+    String OPTION_NO_GLOB = "gogo.option.noglob";
+
     Path currentDir();
 
     void currentDir(Path path);
+
+    ClassLoader classLoader();
+
+    void classLoader(ClassLoader classLoader);
 
     /**
      * Execute a program in this session.
@@ -126,9 +133,11 @@ public interface CommandSession extends AutoCloseable
      * Return the current session.
      * Available inside from a command call.
      */
-    static CommandSession current() {
-        Job j = Job.current();
-        return j != null ? j.session() : null;
+    class Utils {
+        public static CommandSession current() {
+            Job j = Job.Utils.current();
+            return j != null ? j.session() : null;
+        }
     }
 
 }

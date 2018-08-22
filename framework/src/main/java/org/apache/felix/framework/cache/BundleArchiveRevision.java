@@ -61,7 +61,6 @@ public abstract class BundleArchiveRevision
      * @param revisionRootDir the root directory to be used by the revision
      *        subclass for storing any state.
      * @param location the location string associated with the revision.
-     * @param trustedCaCerts the trusted CA certificates if any.
      * @throws Exception if any errors occur.
     **/
     public BundleArchiveRevision(Logger logger, Map configMap, File revisionRootDir, String location)
@@ -125,7 +124,7 @@ public abstract class BundleArchiveRevision
      * @return the case-insensitive JAR file manifest header of the revision.
      * @throws java.lang.Exception if any error occurs.
     **/
-    public abstract Map getManifestHeader() throws Exception;
+    public abstract Map<String, Object> getManifestHeader() throws Exception;
 
     public abstract Content getContent() throws Exception;
 

@@ -18,14 +18,15 @@
  */
 package org.apache.felix.framework.util.manifestparser;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.mockito.Mockito.*;
-import junit.framework.TestCase;
 
 import org.apache.felix.framework.util.FelixConstants;
 import org.osgi.framework.BundleException;
@@ -40,11 +41,13 @@ import org.osgi.framework.wiring.BundleCapability;
 import org.osgi.framework.wiring.BundleRequirement;
 import org.osgi.framework.wiring.BundleRevision;
 
+import junit.framework.TestCase;
+
 public class ManifestParserTest extends TestCase
 {
     public void testIdentityCapabilityMinimal() throws BundleException
     {
-        Map<String, String> headers = new HashMap<String, String>();
+        Map<String, Object> headers = new HashMap<String, Object>();
         headers.put(Constants.BUNDLE_MANIFESTVERSION, "2");
         headers.put(Constants.BUNDLE_SYMBOLICNAME, "foo.bar");
         ManifestParser mp = new ManifestParser(null, null, null, headers);
@@ -57,7 +60,7 @@ public class ManifestParserTest extends TestCase
 
     public void testIdentityCapabilityFull() throws BundleException
     {
-        Map<String, String> headers = new HashMap<String, String>();
+        Map<String, Object> headers = new HashMap<String, Object>();
         headers.put(Constants.BUNDLE_MANIFESTVERSION, "2");
         headers.put(Constants.BUNDLE_SYMBOLICNAME, "abc;singleton:=true");
         headers.put(Constants.BUNDLE_VERSION, "1.2.3.something");
@@ -86,7 +89,7 @@ public class ManifestParserTest extends TestCase
     
     @SuppressWarnings("unchecked")
 	public void testNativeCapability() throws BundleException {
-        Map<String, String> headers = new HashMap<String, String>();
+        Map<String, Object> headers = new HashMap<String, Object>();
         headers.put(Constants.BUNDLE_MANIFESTVERSION,  "2");
         headers.put(Constants.BUNDLE_SYMBOLICNAME, FelixConstants.SYSTEM_BUNDLE_SYMBOLICNAME);
         headers.put(Constants.PROVIDE_CAPABILITY, " osgi.native;" +
@@ -108,6 +111,37 @@ public class ManifestParserTest extends TestCase
         List<String> nativeProcesserList = (List<String>) ic.getAttributes().get(NativeNamespace.CAPABILITY_PROCESSOR_ATTRIBUTE);
         assertEquals(4, nativeProcesserList.size());
     
+    }
+    
+    @SuppressWarnings("unchecked")
+    public void testAttributes() throws BundleException {
+        Map<String, Object> headers = new HashMap<String, Object>();
+        headers.put(Constants.BUNDLE_MANIFESTVERSION,  "2");
+        headers.put(Constants.BUNDLE_SYMBOLICNAME,"com.example.test.sample");
+        headers.put(Constants.PROVIDE_CAPABILITY,
+                "com.example;theList:List<String>=\"red,green,blue\";theLong:Long=111");
+        headers.put(Constants.REQUIRE_CAPABILITY,
+                "com.example.other;theList:List<String>=\"one,two,three\";theLong:Long=999");
+
+        BundleRevision mockBundleRevision = mock(BundleRevision.class);
+
+        when(mockBundleRevision.getSymbolicName()).thenReturn("com.example.test.sample");
+
+        ManifestParser mp = new ManifestParser(null, null, mockBundleRevision, headers);
+
+        BundleCapability bc = findCapability(mp.getCapabilities(), "com.example");
+        Long cLong = (Long) bc.getAttributes().get("theLong");
+        assertEquals(Long.valueOf(111), cLong);
+        List<String> cList = (List<String>)
+                bc.getAttributes().get("theList");
+        assertEquals(3, cList.size());
+        assertTrue(cList.contains("red"));
+
+        BundleRequirement br = findRequirement(mp.getRequirements(), "com.example.other");
+        Long rLong = (Long) br.getAttributes().get("theLong");
+        assertEquals(Long.valueOf(999), rLong);
+        List<String> rList = (List<String>) br.getAttributes().get("theList");
+        assertEquals(3, rList.size());
     }
     
     public void testConvertNativeCode() throws InvalidSyntaxException

@@ -28,8 +28,9 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
+import org.apache.felix.dm.DependencyManager;
 import org.osgi.service.cm.ConfigurationException;
 
 /**
@@ -40,15 +41,14 @@ import org.osgi.service.cm.ConfigurationException;
 public class InvocationUtil {
     private static final Map<Key, Method> m_methodCache;
     static {
-        int size = 2048;
-        // TODO enable this again
-//        try {
-//            String value = System.getProperty(DependencyManager.METHOD_CACHE_SIZE);
-//            if (value != null) {
-//                size = Integer.parseInt(value);
-//            }
-//        }
-//        catch (Exception e) {}
+        int size = 4096;
+        try {
+            String value = System.getProperty(DependencyManager.METHOD_CACHE_SIZE);
+            if (value != null) {
+                size = Integer.parseInt(value);
+            }
+        }
+        catch (Exception e) {}
         m_methodCache = new LRUMap(Math.max(size, 64));
     }
     
@@ -59,11 +59,6 @@ public class InvocationUtil {
     public interface ConfigurationHandler {
         public void handle() throws Exception;
     }
-
-    /**
-     * Max time to wait until a configuration update callback has returned.
-     */
-    private final static int UPDATED_MAXWAIT = 30000; // max time to wait until a CM update has completed
     
     /**
      * Invokes a callback method on an instance. The code will search for a callback method with
@@ -132,6 +127,137 @@ public class InvocationUtil {
             }
         }
         throw new NoSuchMethodException(name);
+    }
+    
+    /**
+     * Invokes a callback method on an instance. The code will search for a callback method with
+     * the supplied name and any of the supplied signatures in order, invoking the first one it finds.
+     * 
+     * @param instance the instance to invoke the method on
+     * @param methodName the name of the method
+     * @param signatures the ordered list of signatures to look for
+     * @param parameters the parameter values to use for each potential signature
+     * @return whatever the method returns
+     * @throws NoSuchMethodException when no method could be found
+     * @throws IllegalArgumentException when illegal values for this methods arguments are supplied 
+     * @throws IllegalAccessException when the method cannot be accessed
+     * @throws InvocationTargetException when the method that was invoked throws an exception
+     */
+    public static Object invokeCallbackMethod(Object instance, String methodName, Class<?>[][] signatures, Supplier<?>[][] parameters) throws NoSuchMethodException, IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+        Class<?> currentClazz = instance.getClass();
+        while (currentClazz != null && currentClazz != Object.class) {
+            try {
+                return invokeMethod(instance, currentClazz, methodName, signatures, parameters, false);
+            }
+            catch (NoSuchMethodException nsme) {
+                // ignore
+            }
+            currentClazz = currentClazz.getSuperclass();
+        }
+        throw new NoSuchMethodException(methodName);
+    }
+
+    /**
+     * Invoke a method on an instance.
+     * 
+     * @param object the instance to invoke the method on
+     * @param clazz the class of the instance
+     * @param name the name of the method
+     * @param signatures the signatures to look for in order
+     * @param paramsSupplier the parameter values for the signatures
+     * @param isSuper <code>true</code> if this is a superclass and we should therefore not look for private methods
+     * @return whatever the method returns
+     * @throws NoSuchMethodException when no method could be found
+     * @throws IllegalArgumentException when illegal values for this methods arguments are supplied 
+     * @throws IllegalAccessException when the method cannot be accessed
+     * @throws InvocationTargetException when the method that was invoked throws an exception
+     */
+    public static Object invokeMethod(Object object, Class<?> clazz, String name, Class<?>[][] signatures, Supplier<?>[][] paramsSupplier, boolean isSuper) throws NoSuchMethodException, InvocationTargetException, IllegalArgumentException, IllegalAccessException {
+        if (object == null) {
+            throw new IllegalArgumentException("Instance cannot be null");
+        }
+        if (clazz == null) {
+            throw new IllegalArgumentException("Class cannot be null");
+        }
+        
+        // if we're talking to a proxy here, dig one level deeper to expose the
+        // underlying invocation handler (we do the same for injecting instances)
+        if (Proxy.isProxyClass(clazz)) {
+            object = Proxy.getInvocationHandler(object);
+            clazz = object.getClass();
+        }
+        
+        Method m = null;
+        for (int i = 0; i < signatures.length; i++) {
+            Class<?>[] signature = signatures[i];
+            m = getDeclaredMethod(clazz, name, signature, isSuper);
+            if (m != null) {
+            	Object[] params = new Object[paramsSupplier[i].length];
+            	for (int j = 0; j < params.length; j ++) {
+            		params[j] = paramsSupplier[i][j].get();            		
+            	}
+                return m.invoke(object, params);
+            }
+        }
+        throw new NoSuchMethodException(name);
+    }
+
+    /**
+     * Gets a callback method on an instance. The code will search for a callback method with
+     * the supplied name and any of the supplied signatures in order, get the first one it finds.
+     * 
+     * @param instance the instance to invoke the method on
+     * @param methodName the name of the method
+     * @param signatures the ordered list of signatures to look for
+     * @return the method found, or null
+     */
+    public static Method getCallbackMethod(Object instance, String methodName, Class<?>[][] signatures) {
+        Class<?> currentClazz = instance.getClass();
+        while (currentClazz != null && currentClazz != Object.class) {
+        	Method m = getMethod(instance, currentClazz, methodName, signatures, false);
+        	if (m != null) {
+        		return m;
+        	}
+            currentClazz = currentClazz.getSuperclass();
+        }
+        return null;
+    }
+
+    /**
+     * Get a method on an instance.
+     * TODO: rework this class to avoid code duplication with invokeMethod !
+     * 
+     * @param object the instance to invoke the method on
+     * @param clazz the class of the instance
+     * @param name the name of the method
+     * @param signatures the signatures to look for in order
+     * @param isSuper <code>true</code> if this is a superclass and we should therefore not look for private methods
+     * @return the found method, or null if not found
+     */
+    public static Method getMethod(Object object, Class<?> clazz, String name, Class<?>[][] signatures, boolean isSuper) {
+        if (object == null) {
+            throw new IllegalArgumentException("Instance cannot be null");
+        }
+        if (clazz == null) {
+            throw new IllegalArgumentException("Class cannot be null");
+        }
+        
+        // if we're talking to a proxy here, dig one level deeper to expose the
+        // underlying invocation handler (we do the same for injecting instances)
+        if (Proxy.isProxyClass(clazz)) {
+            object = Proxy.getInvocationHandler(object);
+            clazz = object.getClass();
+        }
+        
+        Method m = null;
+        for (int i = 0; i < signatures.length; i++) {
+            Class<?>[] signature = signatures[i];
+            m = getDeclaredMethod(clazz, name, signature, isSuper);
+            if (m != null) {
+            	break;
+            }
+        }
+        return m;
     }
     
     private static Method getDeclaredMethod(Class<?> clazz, String name, Class<?>[] signature, boolean isSuper) {
@@ -239,7 +365,7 @@ public class InvocationUtil {
         queue.execute(ft);
                 
         try {
-            Exception err = ft.get(UPDATED_MAXWAIT, TimeUnit.MILLISECONDS);
+            Exception err = ft.get();
             if (err != null) {
                 throw err;
             }

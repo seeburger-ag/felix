@@ -1,4 +1,22 @@
 /*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+/*
  * Copyright 2012 Udo Klimaschewski
  *
  * http://UdoJava.com/
@@ -36,7 +54,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
-import java.util.stream.Collectors;
 
 /**
  * Enhanced to provide assignment operators and variables from a map, comparison operators, string operations and more.
@@ -336,9 +353,10 @@ public class Expression {
         }
 
         public BigDecimal eval(Map<String, Object> variables, List<Object> parameters) {
-            List<BigDecimal> numericParameters = parameters.stream()
-                    .map(o -> toBigDecimal(variables, o))
-                    .collect(Collectors.toList());
+            List<BigDecimal> numericParameters = new ArrayList<>();
+            for (Object o : parameters) {
+                numericParameters.add(toBigDecimal(variables, o));
+            }
             return eval(numericParameters);
         }
 
@@ -1030,7 +1048,7 @@ public class Expression {
      * @return <code>true</code>, if the input string is a number.
      */
     private boolean isNumber(String st) {
-        if (st.charAt(0) == minusSign && st.length() == 1)
+        if (st == null || st.isEmpty() || st.charAt(0) == minusSign && st.length() == 1)
             return false;
         for (char ch : st.toCharArray()) {
             if (!Character.isDigit(ch) && ch != minusSign
