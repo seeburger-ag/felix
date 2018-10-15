@@ -26,6 +26,7 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.logging.Level;
 
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
@@ -38,6 +39,9 @@ import org.osgi.service.log.LogService;
  */
 abstract class BaseMethod
 {
+    private static long METHOD_THRESHOLD = Long.getLong("ds.method.warning.threshold", 100);
+
+    private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(BaseMethod.class.getName());
 
     // class references to simplify parameter checking
     protected static final Class COMPONENT_CONTEXT_CLASS = ComponentContext.class;
@@ -503,6 +507,7 @@ abstract class BaseMethod
     public MethodResult invoke( final Object componentInstance, final Object rawParameter,
             final MethodResult methodCallFailureResult, SimpleLogger logger )
     {
+        long start = System.nanoTime();
         try
         {
             return m_state.invoke( this, componentInstance, rawParameter, logger );
@@ -512,6 +517,16 @@ abstract class BaseMethod
             logger.log( LogService.LOG_ERROR, "The {0} method has thrown an exception", new Object[]
                 { getMethodName() }, ite.getCause() );
         }
+        finally
+        {
+            long duration = (System.nanoTime()-start)/1000000l; // duration in ms
+            String msg = "The method "+getMethodName()+" on "+componentInstance.getClass().getName()+" took "+duration+" ms.";
+            if (duration>METHOD_THRESHOLD) {
+                LOG.log(Level.INFO, msg+" Long running SCR methods should be avoided!");
+            } else {
+                LOG.log(Level.FINE, msg);
+            }
+       }
 
         return methodCallFailureResult;
     }
