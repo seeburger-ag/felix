@@ -27,15 +27,14 @@
   <packaging>bundle</packaging>
   <name>Apache Felix Framework</name>
   <artifactId>org.apache.felix.framework</artifactId>
-  <version>5.6.13-SNAPSHOT</version>
+  <version>5.6.12.SEE1-SNAPSHOT</version>
   <properties>
     <dollar>$</dollar>
     <felix.java.version>6</felix.java.version>
   </properties>
   <scm>
-      <connection>scm:svn:http://svn.apache.org/repos/asf/felix/branches/org.apache.felix.framework-5.6.x</connection>
-      <developerConnection>scm:svn:https://svn.apache.org/repos/asf/felix/branches/org.apache.felix.framework-5.6.x</developerConnection>
-      <url>scm:svn:https://svn.apache.org/repos/asf/felix/branches/org.apache.felix.framework-5.6.x</url>
+      <connection>scm:git:git@github.com:seeburger-ag/felix.git</connection>
+      <developerConnection>scm:git:git@github.com:seeburger-ag/felix.git</developerConnection>
   </scm>
 
   <build>
@@ -54,7 +53,7 @@
             <Export-Package>
                 org.osgi.framework.*;-split-package:=merge-first,
                 org.osgi.resource;-split-package:=first,
-                org.osgi.resource.dto;-split-package:=first,                
+                org.osgi.resource.dto;-split-package:=first,
                 org.osgi.service.packageadmin;-split-package:=first,
                 org.osgi.service.startlevel;-split-package:=first,
 	            org.osgi.service.url;-split-package:=first,
@@ -103,12 +102,31 @@
         </executions>
       </plugin>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <configuration>
+          <skip>true</skip>
+        </configuration>
+      </plugin>
+      <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-javadoc-plugin</artifactId>
             <configuration>
                 <failOnError>false</failOnError>
             </configuration>
       </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-release-plugin</artifactId>
+            <version>2.5.2</version>
+            <configuration>
+                <arguments>${arguments}</arguments>
+                <useReleaseProfile>false</useReleaseProfile>
+                <goals>deploy</goals>
+                 <autoVersionSubmodules>true</autoVersionSubmodules>
+                 <mavenExecutorId>forked-path</mavenExecutorId>
+            </configuration>
+        </plugin>
     </plugins>
     <resources>
       <resource>
@@ -143,4 +161,18 @@
         <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <distributionManagement>
+    <repository>
+        <id>${release.repository.id}</id>
+        <name>Apache Release Distribution Repository</name>
+        <url>${release.repository.url}</url>
+    </repository>
+    <snapshotRepository>
+        <id>apache.snapshots.https</id>
+        <name>Apache Development Snapshot Repository</name>
+        <url>https://repository.apache.org/content/repositories/snapshots</url>
+        <uniqueVersion>false</uniqueVersion>
+    </snapshotRepository>
+</distributionManagement>
 </project>
