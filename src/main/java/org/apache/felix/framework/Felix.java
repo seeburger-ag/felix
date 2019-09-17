@@ -2823,30 +2823,30 @@ public class Felix extends BundleImpl implements Framework
         boolean locked = acquireGlobalLock();
         if (locked)
         {
-            // Populate a set of refresh candidates. This also includes any bundles that this bundle
-            // is wired to but have previously been uninstalled.
-            List<Bundle> refreshCandidates = new ArrayList<Bundle>();
-            refreshCandidates.add(bundle); // Add this bundle first, so that it gets refreshed first
-            BundleRevisions bundleRevisions = bundle.adapt(BundleRevisions.class);
-            if (bundleRevisions != null)
+            try
             {
-                for (BundleRevision br : bundleRevisions.getRevisions())
+                // Populate a set of refresh candidates. This also includes any bundles that this bundle
+                // is wired to but have previously been uninstalled.
+                List<Bundle> refreshCandidates = new ArrayList<Bundle>();
+                refreshCandidates.add(bundle); // Add this bundle first, so that it gets refreshed first
+                BundleRevisions bundleRevisions = bundle.adapt(BundleRevisions.class);
+                if (bundleRevisions != null)
                 {
-                    BundleWiring bw = br.getWiring();
-                    if (bw != null)
+                    for (BundleRevision br : bundleRevisions.getRevisions())
                     {
-                        for (BundleWire wire : bw.getRequiredWires(null))
+                        BundleWiring bw = br.getWiring();
+                        if (bw != null)
                         {
-                            Bundle b = wire.getProvider().getBundle();
-                            if (Bundle.UNINSTALLED == b.getState() && !refreshCandidates.contains(b))
-                                refreshCandidates.add(b);
+                            for (BundleWire wire : bw.getRequiredWires(null))
+                            {
+                                Bundle b = wire.getProvider().getBundle();
+                                if (Bundle.UNINSTALLED == b.getState() && !refreshCandidates.contains(b))
+                                    refreshCandidates.add(b);
+                            }
                         }
                     }
                 }
-            }
 
-            try
-            {
                 for (Bundle b : refreshCandidates)
                 {
                     // If the bundle is not used by anyone, then garbage
@@ -3809,7 +3809,7 @@ public class Felix extends BundleImpl implements Framework
         // If the class comes from bundle class loader, then return
         // associated bundle if it is from this framework instance.
         ClassLoader classLoader = m_secureAction.getClassLoader(clazz);
-        
+
         if (classLoader instanceof BundleReference)
         {
             // Only return the bundle if it is from this framework.
@@ -4170,64 +4170,64 @@ public class Felix extends BundleImpl implements Framework
                 "Unable to acquire global lock for refresh.");
         }
 
-        // Determine set of bundles to refresh, which is all transitive
-        // dependencies of specified set or all transitive dependencies
-        // of all bundles if null is specified.
-        Collection<Bundle> newTargets = targets;
-        if (newTargets == null)
-        {
-            List<Bundle> list = new ArrayList<Bundle>();
-
-            // First add all uninstalled bundles.
-            for (int i = 0;
-                (m_uninstalledBundles != null) && (i < m_uninstalledBundles.size());
-                i++)
-            {
-                list.add(m_uninstalledBundles.get(i));
-            }
-
-            // Then add all updated bundles.
-            Iterator iter = m_installedBundles[LOCATION_MAP_IDX].values().iterator();
-            while (iter.hasNext())
-            {
-                BundleImpl bundle = (BundleImpl) iter.next();
-                if (bundle.isRemovalPending())
-                {
-                    list.add(bundle);
-                }
-            }
-
-            if (!list.isEmpty())
-            {
-                newTargets = list;
-            }
-        }
-
-        // If there are targets, then find all dependencies for each one.
-        Set<Bundle> bundles = null;
-        if (newTargets != null)
-        {
-            // Create map of bundles that import the packages
-            // from the target bundles.
-            bundles = new HashSet<Bundle>();
-            for (Bundle target : newTargets)
-            {
-                // If anyone passes in a null bundle, then just
-                // ignore it.
-                if (target != null)
-                {
-                    // Add the current target bundle to the map of
-                    // bundles to be refreshed.
-                    bundles.add(target);
-                    // Add all importing bundles to map.
-                    populateDependentGraph((BundleImpl) target, bundles);
-                }
-            }
-        }
-
-        // Now refresh each bundle.
         try
         {
+            // Determine set of bundles to refresh, which is all transitive
+            // dependencies of specified set or all transitive dependencies
+            // of all bundles if null is specified.
+            Collection<Bundle> newTargets = targets;
+            if (newTargets == null)
+            {
+                List<Bundle> list = new ArrayList<Bundle>();
+
+                // First add all uninstalled bundles.
+                for (int i = 0;
+                    (m_uninstalledBundles != null) && (i < m_uninstalledBundles.size());
+                    i++)
+                {
+                    list.add(m_uninstalledBundles.get(i));
+                }
+
+                // Then add all updated bundles.
+                Iterator iter = m_installedBundles[LOCATION_MAP_IDX].values().iterator();
+                while (iter.hasNext())
+                {
+                    BundleImpl bundle = (BundleImpl) iter.next();
+                    if (bundle.isRemovalPending())
+                    {
+                        list.add(bundle);
+                    }
+                }
+
+                if (!list.isEmpty())
+                {
+                    newTargets = list;
+                }
+            }
+
+            // If there are targets, then find all dependencies for each one.
+            Set<Bundle> bundles = null;
+            if (newTargets != null)
+            {
+                // Create map of bundles that import the packages
+                // from the target bundles.
+                bundles = new HashSet<Bundle>();
+                for (Bundle target : newTargets)
+                {
+                    // If anyone passes in a null bundle, then just
+                    // ignore it.
+                    if (target != null)
+                    {
+                        // Add the current target bundle to the map of
+                        // bundles to be refreshed.
+                        bundles.add(target);
+                        // Add all importing bundles to map.
+                        populateDependentGraph((BundleImpl) target, bundles);
+                    }
+                }
+            }
+
+            // Now refresh each bundle.
             boolean restart = false;
 
             Bundle systemBundle = this;

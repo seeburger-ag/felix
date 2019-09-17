@@ -20,6 +20,7 @@ package org.apache.felix.framework.util;
 
 import java.io.*;
 import java.lang.reflect.*;
+import java.lang.reflect.Proxy;
 import java.net.*;
 import java.security.*;
 import java.util.Collection;
@@ -1473,6 +1474,80 @@ public class SecureAction
         }
     }
 
+    public <T> T run(PrivilegedAction<T> action)
+    {
+        if (System.getSecurityManager() != null)
+        {
+            return AccessController.doPrivileged(action);
+        }
+        else
+        {
+            return action.run();
+        }
+    }
+
+    public <T> T run(PrivilegedExceptionAction<T> action) throws Exception
+    {
+        if (System.getSecurityManager() != null)
+        {
+            try
+            {
+                return AccessController.doPrivileged(action);
+            }
+            catch (PrivilegedActionException e)
+            {
+                throw e.getException();
+            }
+        }
+        else
+        {
+            return action.run();
+        }
+    }
+
+    public String getCanonicalPath(File dataFile) throws IOException
+    {
+        if (System.getSecurityManager() != null)
+        {
+            Actions actions = (Actions) m_actions.get();
+            actions.set(Actions.GET_CANONICAL_PATH, dataFile);
+            try
+            {
+                return (String) AccessController.doPrivileged(actions, m_acc);
+            }
+            catch (PrivilegedActionException e)
+            {
+                throw (IOException) e.getException();
+            }
+        }
+        else
+        {
+            return dataFile.getCanonicalPath();
+        }
+    }
+
+    public Object createProxy(ClassLoader classLoader,
+            Class<?>[] interfaces, InvocationHandler handler)
+    {
+        if (System.getSecurityManager() != null)
+        {
+            Actions actions = (Actions) m_actions.get();
+            actions.set(Actions.CREATE_PROXY, classLoader, interfaces, handler);
+            try
+            {
+                return AccessController.doPrivileged(actions, m_acc);
+            }
+            catch (PrivilegedActionException e)
+            {
+            	throw (RuntimeException) e.getException();
+            }
+        }
+        else
+        {
+            return Proxy.newProxyInstance(classLoader, interfaces, handler);
+        }
+    }
+
     private static class Actions implements PrivilegedExceptionAction
     {
         public static final int INITIALIZE_CONTEXT_ACTION = 0;
@@ -1532,6 +1607,8 @@ public class SecureAction
         public static final int OPEN_JARFILE_ACTION = 54;
         public static final int DELETE_FILEONEXIT_ACTION = 55;
         public static final int INVOKE_WOVEN_CLASS_LISTENER = 56;
+        public static final int GET_CANONICAL_PATH = 57;
+        public static final int CREATE_PROXY = 58;
 
         private int m_action = -1;
         private Object m_arg1 = null;
@@ -1790,6 +1867,11 @@ public class SecureAction
                     ((org.osgi.framework.hooks.weaving.WovenClassListener) arg1).modified(
                         (org.osgi.framework.hooks.weaving.WovenClass) arg2);
                     return null;
+                case GET_CANONICAL_PATH:
+                    return ((File) arg1).getCanonicalPath();
+                case CREATE_PROXY:
+                    return Proxy.newProxyInstance((ClassLoader)arg1, (Class<?>[])arg2,
+                            (InvocationHandler) arg3);
             }
 
             return null;

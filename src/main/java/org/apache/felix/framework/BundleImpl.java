@@ -557,10 +557,10 @@ class BundleImpl implements Bundle, BundleRevisions
 
     private static List<String> createLocalizationResourceList(String basename, String locale)
     {
-        List<String> result = new ArrayList(4);
+        List<String> result = new ArrayList<String>(4);
 
         StringTokenizer tokens;
-        StringBuffer tempLocale = new StringBuffer(basename);
+        StringBuilder tempLocale = new StringBuilder(basename);
 
         result.add(tempLocale.toString());
 
